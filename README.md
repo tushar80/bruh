@@ -14,9 +14,12 @@ streaming HTTP/SSE.
 - Six built-in tools the model can call autonomously:
   `bash`, `read`, `write`, `edit`, `grep`, `glob`
 - Multi-step planning loop: explore -> plan -> act -> verify
-- Two backend formats, selectable at the CLI:
-  - `--provider openai`    -> `https://opencode.ai/zen/go/v1/chat/completions`
-  - `--provider anthropic` -> `https://opencode.ai/zen/go/v1/messages`
+- Two backend formats, selectable at the CLI (the endpoint depends on the
+  model — see [opencode.ai/docs/go](https://opencode.ai/docs/go)):
+  - `--provider openai`    -> `…/v1/chat/completions` (default; for glm-5.2,
+    grok-4.5, kimi-*, deepseek-v4-*, mimo-v2.5*, hy3)
+  - `--provider anthropic` -> `…/v1/messages` (for minimax-m3/m2.7/m2.5,
+    qwen3.7-max/plus, qwen3.6-plus)
 
 ## Setup
 
@@ -45,7 +48,7 @@ uv run simple-agent -p "summarize the top-level layout of this repo"
 Use the Anthropic wire format instead of OpenAI:
 
 ```bash
-uv run simple-agent --provider anthropic -p "find and fix the typo in README"
+uv run simple-agent --provider anthropic --model minimax-m3 -p "find and fix the typo in README"
 ```
 
 Flags:
@@ -53,7 +56,8 @@ Flags:
 ```
 -p, --prompt PROMPT               single prompt, then exit
 --provider {openai,anthropic}     wire format (default: openai)
---model MODEL                     model id (default: opencode-go/glm-5.2)
+--model MODEL                     model id, e.g. glm-5.2, kimi-k3, minimax-m3
+                                  (default: glm-5.2)
 --max-tokens N                    completion cap (default: 8192)
 --temperature T                   sampling temp (default: 0.7)
 --max-steps N                     max tool-call rounds per turn (default: 50)

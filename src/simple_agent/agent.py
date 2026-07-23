@@ -29,7 +29,7 @@ from .providers import (
 )
 from .tools import TOOL_SPECS, run_tool
 
-DEFAULT_MODEL = "opencode-go/glm-5.2"
+DEFAULT_MODEL = "glm-5.2"
 MAX_STEPS = 50
 MAX_TOOL_OUTPUT = 20_000
 
@@ -231,7 +231,12 @@ def main() -> None:
     p.add_argument("-p", "--prompt", help="Run a single prompt and exit (non-interactive)")
     p.add_argument("--provider", choices=["openai", "anthropic"], default="openai",
                    help="API format to use against opencode-go")
-    p.add_argument("--model", default=DEFAULT_MODEL, help=f"Model id (default: {DEFAULT_MODEL})")
+    p.add_argument("--model", default=DEFAULT_MODEL,
+                   help=f"Model id, e.g. glm-5.2, kimi-k3, minimax-m3 (default: {DEFAULT_MODEL}). "
+                        "OpenAI-format models: glm-5.2, grok-4.5, kimi-k3, kimi-k2.7-code, kimi-k2.6, "
+                        "deepseek-v4-pro/flash, mimo-v2.5[-pro], hy3. "
+                        "Anthropic-format models: minimax-m3/m2.7/m2.5, qwen3.7-max/plus, qwen3.6-plus "
+                        "(use --provider anthropic).")
     p.add_argument("--max-tokens", type=int, default=8192)
     p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Max tool-call steps per turn")
