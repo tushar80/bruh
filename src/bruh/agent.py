@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from .providers import (
@@ -36,6 +38,7 @@ from .tools import TOOL_SPECS, run_tool
 DEFAULT_MODEL = "glm-5.2"
 MAX_STEPS = 50
 MAX_TOOL_OUTPUT = 20_000
+TOOL_WORKERS = 8
 
 SYSTEM_PROMPT = """\
 You are a helpful coding agent operating in the user's local repository.
@@ -107,6 +110,55 @@ class Agent:
         )
         return self.last_usage.total_tokens + trailing
 
+    def _execute_tool_turn(
+        self, new_blocks: list[ContentBlock], step: int,
+    ) -> list[ContentBlock]:
+        """Run every ToolUseBlock in ``new_blocks`` concurrently and return
+        ToolResultBlock list in the same order as the tool_use blocks appeared
+        on the wire. Bash/reads are I/O-bound, so threads suffice; order is
+        preserved because the Anthropic messages API requires tool_result ids
+        to line up with the prior tool_use ids."""
+        calls: list[ToolUseBlock] = [
+            b for b in new_blocks if isinstance(b, ToolUseBlock)
+        ]
+        if not calls:
+            return []
+        if self.verbose:
+            names = ", ".join(c.name for c in calls)
+            print(f"\n[step {step}] running {len(calls)} tool(s) in parallel: {names}",
+                  file=sys.stderr)
+
+        verbose_lock = threading.Lock() if self.verbose else None
+
+        def _run_one(call: ToolUseBlock) -> str:
+            result = run_tool(call.name, call.arguments)
+            if self.verbose and verbose_lock is not None:
+                snippet = result[:300].replace("\n", "\n  ")
+                with verbose_lock:
+                    print(
+                        f"  -> {call.name} ({call.id}): "
+                        f"{snippet}{'...' if len(result) > 300 else ''}",
+                        file=sys.stderr,
+                    )
+            return result
+
+        if len(calls) == 1:
+            ordered: list[str] = [_run_one(calls[0])]
+        else:
+            with ThreadPoolExecutor(max_workers=TOOL_WORKERS) as pool:
+                ordered = list(pool.map(_run_one, calls))
+
+        results: list[ContentBlock] = []
+        for call, text in zip(calls, ordered):
+            results.append(
+                ToolResultBlock(
+                    tool_use_id=call.id,
+                    content=text[:MAX_TOOL_OUTPUT],
+                    is_error=text.startswith("[error"),
+                )
+            )
+        return results
+
     def _drive_loop(self) -> str:
         final_text_parts: list[str] = []
         for step in range(1, self.max_steps + 1):
@@ -136,23 +188,8 @@ class Agent:
                 else:
                     print(f"[~{total} tokens in context]", file=sys.stderr)
 
-            # Execute every tool call from this turn
-            tool_results: list[ContentBlock] = []
-            for block in new_blocks:
-                if isinstance(block, ToolUseBlock):
-                    if self.verbose:
-                        print(f"\n[step {step}] tool: {block.name}", file=sys.stderr)
-                    result_text = run_tool(block.name, block.arguments)
-                    if self.verbose:
-                        snippet = result_text[:300].replace("\n", "\n  ")
-                        print(f"  -> {snippet}{'...' if len(result_text) > 300 else ''}", file=sys.stderr)
-                    tool_results.append(
-                        ToolResultBlock(
-                            tool_use_id=block.id,
-                            content=result_text[:MAX_TOOL_OUTPUT],
-                            is_error=result_text.startswith("[error"),
-                        )
-                    )
+            # Execute every tool call from this turn (in parallel)
+            tool_results = self._execute_tool_turn(new_blocks, step)
             if tool_results:
                 self.messages.append(Message(role="user", content=tool_results))
         else:
