@@ -25,6 +25,7 @@ from .providers import (
     ToolResultBlock,
     ToolSpec,
     ToolUseBlock,
+    estimate_context_tokens,
     get_config,
 )
 from .tools import TOOL_SPECS, run_tool
@@ -106,6 +107,10 @@ class Agent:
                 if self.verbose:
                     print(f"\n[step {step}] assistant done ({stop})", file=sys.stderr)
                 break
+
+            if self.verbose:
+                total = estimate_context_tokens(self.messages, SYSTEM_PROMPT)
+                print(f"[~{total} tokens in context]", file=sys.stderr)
 
             # Execute every tool call from this turn
             tool_results: list[ContentBlock] = []

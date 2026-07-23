@@ -59,6 +59,37 @@ class Message:
 
 
 # --------------------------------------------------------------------------- #
+# Token estimation (chars/4 heuristic, conservative overestimate)            #
+# --------------------------------------------------------------------------- #
+
+# Roughly 1 token per 4 chars; overestimates slightly (safer for budget checks).
+ESTIMATED_IMAGE_CHARS = 4800
+
+
+def estimate_tokens(message: Message) -> int:
+    """Estimate token count for a Message using the chars/4 heuristic."""
+    chars = 0
+    for block in message.content:
+        if isinstance(block, TextBlock):
+            chars += len(block.text)
+        elif isinstance(block, ThinkingBlock):
+            chars += len(block.thinking)
+        elif isinstance(block, ToolUseBlock):
+            chars += len(block.name) + len(json.dumps(block.arguments, default=str))
+        elif isinstance(block, ToolResultBlock):
+            chars += len(block.content)
+    return -(-chars // 4)  # ceil
+
+
+def estimate_context_tokens(messages: list[Message], system: str = "") -> int:
+    """Estimate total tokens across system + all messages."""
+    total = len(system)
+    for msg in messages:
+        total += estimate_tokens(msg)
+    return -(-total // 4)
+
+
+# --------------------------------------------------------------------------- #
 # Tool / usage / events                                                        #
 # --------------------------------------------------------------------------- #
 
