@@ -211,7 +211,7 @@ class OpenAICompletionsProvider:
 
             for chunk in _parse_sse_lines(resp.iter_lines()):
                 choice = (chunk.get("choices") or [{}])[0]
-                delta = choice.get("delta", {})
+                delta = choice.get("delta") or {}
 
                 # Reasoning/reasoning_content field (some providers use "reasoning")
                 reasoning = delta.get("reasoning") or delta.get("reasoning_content")
@@ -221,12 +221,12 @@ class OpenAICompletionsProvider:
                 if delta.get("content"):
                     yield Event(type="text", text=delta["content"])
 
-                for tc in delta.get("tool_calls", []):
+                for tc in (delta.get("tool_calls") or []):
                     idx = tc.get("index", 0)
                     buf = tool_buffers.setdefault(idx, {"id": "", "name": "", "args": ""})
                     if tc.get("id"):
                         buf["id"] = tc["id"]
-                    fn = tc.get("function", {})
+                    fn = tc.get("function") or {}
                     if fn.get("name"):
                         buf["name"] = fn["name"]
                     if fn.get("arguments"):
