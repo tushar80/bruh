@@ -1,8 +1,8 @@
-"""Providers for the opencode-go endpoint.
+"""Streaming providers for chat completions and messages APIs.
 
-Two backends are supported, both OpenCode Zen Go:
-  - OpenAI completions  -> https://opencode.ai/zen/go/v1/chat/completions
-  - Anthropic messages  -> https://opencode.ai/zen/go/v1/messages
+Two backends are supported:
+  - OpenAI chat completions  -> {base}/chat/completions
+  - Anthropic messages       -> {base}/messages
 
 Both stream SSE responses with httpx. The agent loop calls
 ``stream()`` and accumulates text + tool calls from the event stream.
@@ -143,22 +143,17 @@ class Provider(Protocol):
 # Config                                                                       #
 # --------------------------------------------------------------------------- #
 
-# Base URL for the OpenCode Go subscription endpoint. Individual endpoints:
-#   OpenAI-compatible models  -> {base}/chat/completions
-#   Anthropic-format models   -> {base}/messages
-# Model -> format mapping (see https://opencode.ai/docs/go):
-#   openai-compatible : glm-5.2, glm-5.1, grok-4.5, kimi-k3, kimi-k2.7-code,
-#                       kimi-k2.6, deepseek-v4-pro, deepseek-v4-flash,
-#                       mimo-v2.5, mimo-v2.5-pro, hy3
-#   anthropic         : minimax-m3, minimax-m2.7, minimax-m2.5, qwen3.7-max,
-#                       qwen3.7-plus, qwen3.6-plus
+# Default base URL. Individual endpoints:
+#   chat completions -> {base}/chat/completions
+#   messages         -> {base}/messages
+# Override with BRUH_BASE_URL.
 DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1"
 
 
 def get_config() -> dict[str, str | None]:
     return {
-        "api_key": os.environ.get("OPENCODE_API_KEY"),
-        "base_url": os.environ.get("OPENCODE_BASE_URL", DEFAULT_BASE_URL),
+        "api_key": os.environ.get("BRUH_API_KEY"),
+        "base_url": os.environ.get("BRUH_BASE_URL", DEFAULT_BASE_URL),
     }
 
 
@@ -482,7 +477,7 @@ def create_provider(fmt: str = "openai") -> Provider:
     api_key = cfg["api_key"] or ""
     base_url = cfg["base_url"] or DEFAULT_BASE_URL
     if not api_key:
-        raise RuntimeError("OPENCODE_API_KEY environment variable is not set")
+        raise RuntimeError("BRUH_API_KEY environment variable is not set")
     if fmt == "anthropic":
         return AnthropicMessagesProvider(api_key, base_url)  # type: ignore[return-value]
     return OpenAICompletionsProvider(api_key, base_url)  # type: ignore[return-value]

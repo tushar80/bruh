@@ -2,9 +2,9 @@
 
 Run interactively with:
 
-    uv run simple-agent
-    uv run simple-agent -p "do something"
-    uv run simple-agent --provider anthropic
+    uv run bruh
+    uv run bruh -p "do something"
+    uv run bruh --provider anthropic
 """
 
 from __future__ import annotations
@@ -221,7 +221,7 @@ def _make_provider(fmt: str) -> OpenAICompletionsProvider | AnthropicMessagesPro
     api_key = cfg["api_key"] or ""
     base_url = cfg["base_url"] or "https://opencode.ai/zen/go/v1"
     if not api_key:
-        print("error: set OPENCODE_API_KEY before running", file=sys.stderr)
+        print("error: set BRUH_API_KEY before running", file=sys.stderr)
         sys.exit(2)
     if fmt == "anthropic":
         return AnthropicMessagesProvider(api_key, base_url)
@@ -230,12 +230,12 @@ def _make_provider(fmt: str) -> OpenAICompletionsProvider | AnthropicMessagesPro
 
 def main() -> None:
     p = argparse.ArgumentParser(
-        prog="simple-agent",
-        description="A pi-style coding agent powered by opencode-go (glm-5.2)",
+        prog="bruh",
+        description="A minimal coding agent over chat completions and messages APIs",
     )
     p.add_argument("-p", "--prompt", help="Run a single prompt and exit (non-interactive)")
     p.add_argument("--provider", choices=["openai", "anthropic"], default="openai",
-                   help="API format to use against opencode-go")
+                   help="API format: chat completions or messages")
     p.add_argument("--model", default=DEFAULT_MODEL,
                    help=f"Model id, e.g. glm-5.2, kimi-k3, minimax-m3 (default: {DEFAULT_MODEL}). "
                         "OpenAI-format models: glm-5.2, grok-4.5, kimi-k3, kimi-k2.7-code, kimi-k2.6, "
@@ -262,7 +262,7 @@ def main() -> None:
         agent.run(args.prompt)
         return
 
-    print("simple-agent ready. ^D to exit.\n", file=sys.stderr)
+    print("bruh ready. ^D to exit.\n", file=sys.stderr)
     while True:
         try:
             line = input("you> ")

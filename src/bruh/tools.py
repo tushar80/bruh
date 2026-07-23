@@ -52,7 +52,7 @@ def tool_bash(command: str, workdir: str | None = None, timeout: int = 120) -> s
 
 
 def tool_read(file_path: str, offset: int = 1, limit: int = MAX_READ_LINES) -> str:
-    """Read a slice of a file, 1-indexed line numbers, like pi's Read tool."""
+    """Read a slice of a file, 1-indexed line numbers, with line-number prefixes."""
     try:
         p = Path(file_path)
         if not p.exists() or not p.is_file():

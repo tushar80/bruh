@@ -1,12 +1,8 @@
-# simple-agent
+# bruh
 
-A small, pi-style coding agent in Python. Talks to the **opencode-go**
-(`glm-5.2`) endpoint via OpenAI-completions or Anthropic-messages wire
-format, driven by a tool-using planning loop.
-
-Inspired by the architecture of [`pi`](../pi) but minimal: ~300 lines of
-Python, stdlib-only except for [httpx](https://www.python-httpx.org/) for
-streaming HTTP/SSE.
+A minimal coding agent in Python. Talks to chat completions and messages
+APIs, driven by a tool-using planning loop. ~600 lines of Python, depends
+only on [httpx](https://www.python-httpx.org/) for streaming HTTP/SSE.
 
 ## What it does
 
@@ -14,19 +10,17 @@ streaming HTTP/SSE.
 - Six built-in tools the model can call autonomously:
   `bash`, `read`, `write`, `edit`, `grep`, `glob`
 - Multi-step planning loop: explore -> plan -> act -> verify
-- Two backend formats, selectable at the CLI (the endpoint depends on the
-  model — see [opencode.ai/docs/go](https://opencode.ai/docs/go)):
-  - `--provider openai`    -> `…/v1/chat/completions` (default; for glm-5.2,
-    grok-4.5, kimi-*, deepseek-v4-*, mimo-v2.5*, hy3)
-  - `--provider anthropic` -> `…/v1/messages` (for minimax-m3/m2.7/m2.5,
-    qwen3.7-max/plus, qwen3.6-plus)
+- Two backend formats, selectable at the CLI:
+  - `--provider openai`    -> `{base}/chat/completions` (default)
+  - `--provider anthropic` -> `{base}/messages`
+- Live context-token estimate in verbose mode
 
 ## Setup
 
 ```bash
-uv sync                                    # installs httpx
-export OPENCODE_API_KEY=...                # your opencode-go key
-# optional: export OPENCODE_BASE_URL=https://opencode.ai/zen/go/v1
+uv sync
+export BRUH_API_KEY=...                # your api key
+# optional: export BRUH_BASE_URL=https://your-endpoint/v1
 ```
 
 ## Usage
@@ -34,21 +28,21 @@ export OPENCODE_API_KEY=...                # your opencode-go key
 Interactive session:
 
 ```bash
-uv run simple-agent -v
-you> /how big is src/main.py
+uv run bruh -v
+you> how big is src/main.py
 you> add type hints to utils.py and run the tests
 ```
 
 One-shot prompt, non-interactive:
 
 ```bash
-uv run simple-agent -p "summarize the top-level layout of this repo"
+uv run bruh -p "summarize the top-level layout of this repo"
 ```
 
-Use the Anthropic wire format instead of OpenAI:
+Use the messages wire format instead of chat completions:
 
 ```bash
-uv run simple-agent --provider anthropic --model minimax-m3 -p "find and fix the typo in README"
+uv run bruh --provider anthropic --model minimax-m3 -p "find and fix the typo in README"
 ```
 
 Flags:
@@ -56,21 +50,20 @@ Flags:
 ```
 -p, --prompt PROMPT               single prompt, then exit
 --provider {openai,anthropic}     wire format (default: openai)
---model MODEL                     model id, e.g. glm-5.2, kimi-k3, minimax-m3
-                                  (default: glm-5.2)
+--model MODEL                     model id (default: glm-5.2)
 --max-tokens N                    completion cap (default: 8192)
 --temperature T                   sampling temp (default: 0.7)
 --max-steps N                     max tool-call rounds per turn (default: 50)
--v, --verbose                     stream thinking + tool calls to stderr
+-v, --verbose                     stream thinking + tool calls + token estimate to stderr
 ```
 
 ## Layout
 
 ```
-src/simple_agent/
+src/bruh/
   __init__.py
   agent.py       Agent loop, argparse CLI, system prompt
-  providers.py   OpenAI-completions + Anthropic-messages streaming clients
+  providers.py   chat-completions + messages streaming clients, token estimation
   tools.py       Tool implementations and the JSON-schema registry
 pyproject.toml   uv project; depends only on httpx
 ```
@@ -79,10 +72,10 @@ pyproject.toml   uv project; depends only on httpx
 
 - Tool round-trips are synchronous; no parallel tool execution.
 - The `ThinkingBlock` is recorded in the assistant turn but is only
-  truly round-tripped by the Anthropic wire format.
+  truly round-tripped by the messages wire format.
 - `MAX_TOOL_OUTPUT` (`20_000` chars) caps each tool result before it is
   fed back to the model, to keep history bounded.
 - If the model calls a tool repeatedly without finishing,
   `--max-steps` stops the loop (default 50).
-- Not affiliated with the `pi` project; this is an independent, simpler
-  implementation that targets the same opencode-go endpoint.
+- No context compaction: message history grows unbounded. Watch the
+  verbose token estimate and start a new session when it gets large.
