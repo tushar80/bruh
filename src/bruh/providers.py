@@ -106,6 +106,29 @@ class Usage:
     input_tokens: int = 0
     output_tokens: int = 0
 
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
+def merge_usage(current: Usage | None, new: Usage | None) -> Usage | None:
+    """Fold a usage delta into the running turn usage.
+
+    Anthropic splits usage across message_start (input) and message_delta
+    (output). OpenAI reports both in a single done event. Treat input as
+    the maximum (cumulative full context) and output as additive (deltas)."""
+    if new is None:
+        return current
+    if current is None:
+        return Usage(
+            input_tokens=new.input_tokens,
+            output_tokens=new.output_tokens,
+        )
+    return Usage(
+        input_tokens=max(current.input_tokens, new.input_tokens),
+        output_tokens=current.output_tokens + new.output_tokens,
+    )
+
 
 @dataclass
 class Event:

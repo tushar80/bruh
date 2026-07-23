@@ -25,8 +25,11 @@ from .providers import (
     ToolResultBlock,
     ToolSpec,
     ToolUseBlock,
+    Usage,
     estimate_context_tokens,
+    estimate_tokens,
     get_config,
+    merge_usage,
 )
 from .tools import TOOL_SPECS, run_tool
 
@@ -82,6 +85,8 @@ class Agent:
         self.verbose = verbose
         self.messages: list[Message] = []
         self.tools = _build_tool_specs()
+        self.last_usage: Usage | None = None
+        self.last_usage_index: int = -1
 
     # --- public ------------------------------------------------------------- #
 
@@ -92,25 +97,44 @@ class Agent:
 
     # --- loop --------------------------------------------------------------- #
 
+    def _context_tokens(self) -> int:
+        """Context estimate anchored to the last real provider usage when
+        available; falls back to the chars/4 heuristic for everything."""
+        if self.last_usage is None or self.last_usage_index < 0:
+            return estimate_context_tokens(self.messages, SYSTEM_PROMPT)
+        trailing = sum(
+            estimate_tokens(msg) for msg in self.messages[self.last_usage_index + 1:]
+        )
+        return self.last_usage.total_tokens + trailing
+
     def _drive_loop(self) -> str:
         final_text_parts: list[str] = []
         for step in range(1, self.max_steps + 1):
-            new_blocks, stop, text_out, did_tools = self._stream_step()
+            new_blocks, stop, text_out, did_tools, turn_usage = self._stream_step()
             if text_out:
                 final_text_parts.append(text_out)
             if not new_blocks:
                 break
             self.messages.append(Message(role="assistant", content=new_blocks))
+            if turn_usage is not None:
+                self.last_usage = turn_usage
+                self.last_usage_index = len(self.messages) - 1
 
             if not did_tools:
-                # assistant finished with a plain message
+                # assistant finished with a plain message (or turn was aborted)
                 if self.verbose:
                     print(f"\n[step {step}] assistant done ({stop})", file=sys.stderr)
                 break
 
             if self.verbose:
-                total = estimate_context_tokens(self.messages, SYSTEM_PROMPT)
-                print(f"[~{total} tokens in context]", file=sys.stderr)
+                total = self._context_tokens()
+                if self.last_usage is not None:
+                    print(
+                        f"[~{total} tokens in context (real: {self.last_usage.total_tokens})]",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(f"[~{total} tokens in context]", file=sys.stderr)
 
             # Execute every tool call from this turn
             tool_results: list[ContentBlock] = []
@@ -136,15 +160,16 @@ class Agent:
 
         return "\n".join(final_text_parts)
 
-    def _stream_step(self) -> tuple[list[ContentBlock], str, str, bool]:
+    def _stream_step(self) -> tuple[list[ContentBlock], str, str, bool, Usage | None]:
         """One provider round-trip with streaming. Returns:
-        (assistant_blocks, stop_reason, seen_text, had_tool_calls)."""
+        (assistant_blocks, stop_reason, seen_text, had_tool_calls, turn_usage)."""
         text_buf = ""
         thinking_shown = False
         tool_calls: dict[str, dict[str, Any]] = {}
         stop_reason = ""
         had_error = False
         seen_text_parts: list[str] = []
+        turn_usage: Usage | None = None
 
         stream: Iterator[Event] = self.provider.stream(
             system=SYSTEM_PROMPT,
@@ -155,41 +180,52 @@ class Agent:
             temperature=self.temperature,
         )
 
-        for ev in stream:
-            if ev.type == "thinking":
-                if ev.text:
-                    if self.verbose and not thinking_shown:
-                        print("\n[thinking] ", end="", file=sys.stderr, flush=True)
-                        thinking_shown = True
+        try:
+            for ev in stream:
+                if ev.type == "thinking":
+                    if ev.text:
+                        if self.verbose and not thinking_shown:
+                            print("\n[thinking] ", end="", file=sys.stderr, flush=True)
+                            thinking_shown = True
+                        if self.verbose:
+                            print(ev.text, end="", file=sys.stderr, flush=True)
+                elif ev.type == "text":
+                    if ev.text:
+                        print(ev.text, end="", flush=True)
+                        text_buf += ev.text
+                        seen_text_parts.append(ev.text)
+                elif ev.type == "tool_start":
                     if self.verbose:
-                        print(ev.text, end="", file=sys.stderr, flush=True)
-            elif ev.type == "text":
-                if ev.text:
-                    print(ev.text, end="", flush=True)
-                    text_buf += ev.text
-                    seen_text_parts.append(ev.text)
-            elif ev.type == "tool_start":
-                if self.verbose:
-                    print(f"\n[tool: {ev.tool_name} ({ev.tool_id})]", file=sys.stderr)
-                tool_calls[ev.tool_id] = {"name": ev.tool_name, "args": ""}
-            elif ev.type == "tool_delta":
-                if ev.tool_id in tool_calls and ev.tool_args_json:
-                    tool_calls[ev.tool_id]["args"] = ev.tool_args_json
-            elif ev.type == "tool_end":
-                entry = tool_calls.get(ev.tool_id)
-                if entry is None:
-                    tool_calls[ev.tool_id] = {"name": ev.tool_name, "args": ev.tool_args_json}
-                else:
-                    entry["args"] = ev.tool_args_json or entry["args"]
-            elif ev.type == "done":
-                if ev.stop_reason:
-                    stop_reason = ev.stop_reason
-            elif ev.type == "error":
-                print(f"\n[error] {ev.error}", file=sys.stderr)
-                had_error = True
+                        print(f"\n[tool: {ev.tool_name} ({ev.tool_id})]", file=sys.stderr)
+                    tool_calls[ev.tool_id] = {"name": ev.tool_name, "args": ""}
+                elif ev.type == "tool_delta":
+                    if ev.tool_id in tool_calls and ev.tool_args_json:
+                        tool_calls[ev.tool_id]["args"] = ev.tool_args_json
+                elif ev.type == "tool_end":
+                    entry = tool_calls.get(ev.tool_id)
+                    if entry is None:
+                        tool_calls[ev.tool_id] = {"name": ev.tool_name, "args": ev.tool_args_json}
+                    else:
+                        entry["args"] = ev.tool_args_json or entry["args"]
+                elif ev.type == "done":
+                    if ev.stop_reason:
+                        stop_reason = ev.stop_reason
+                    if ev.usage is not None:
+                        turn_usage = merge_usage(turn_usage, ev.usage)
+                elif ev.type == "error":
+                    print(f"\n[error] {ev.error}", file=sys.stderr)
+                    had_error = True
+        except KeyboardInterrupt:
+            # Ctrl+C during streaming: abort the turn but keep the session alive.
+            # httpx.stream's context manager closes the underlying request on the
+            # way out. Drop in-flight tool calls so we don't leave the assistant
+            # message with a tool_use that has no matching tool_result.
+            print("\n[aborted]", file=sys.stderr)
+            stop_reason = "aborted"
+            tool_calls = {}
 
         if had_error and not tool_calls and not text_buf:
-            return [], stop_reason, "", False
+            return [], stop_reason, "", False, turn_usage
 
         # Build assistant content blocks for history
         new_blocks: list[ContentBlock] = []
@@ -208,7 +244,7 @@ class Agent:
         if text_buf:
             print()  # newline after streamed text
 
-        return new_blocks, stop_reason, text_buf, len(tool_calls) > 0
+        return new_blocks, stop_reason, text_buf, len(tool_calls) > 0, turn_usage
 
 
 # --------------------------------------------------------------------------- #
