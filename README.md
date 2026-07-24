@@ -4,16 +4,21 @@ A minimal coding agent in Python. Talks to chat completions and messages
 APIs, driven by a tool-using planning loop. ~600 lines of Python, depends
 only on [httpx](https://www.python-httpx.org/) for streaming HTTP/SSE.
 
+Design and behavior are informed by [pi](https://pi.dev)
+([source](https://github.com/earendil-works/pi-mono)); bruh is a stripped-down Python port of the
+ideas there, not a feature-for-feature clone.
+
 ## What it does
 
 - Streams model responses live to your terminal
 - Six built-in tools the model can call autonomously:
   `bash`, `read`, `write`, `edit`, `grep`, `glob`
 - Multi-step planning loop: explore -> plan -> act -> verify
+- Tool calls within a turn run in parallel
 - Two backend formats, selectable at the CLI:
   - `--provider openai`    -> `{base}/chat/completions` (default)
   - `--provider anthropic` -> `{base}/messages`
-- Live context-token estimate in verbose mode
+- Live context-token estimate in verbose mode, anchored to real provider usage when available
 
 ## Setup
 
@@ -70,7 +75,8 @@ pyproject.toml   uv project; depends only on httpx
 
 ## Notes / limitations
 
-- Tool round-trips are synchronous; no parallel tool execution.
+- Tools within a turn run in parallel; bash subprocesses are not cancelled
+  if you Ctrl+C mid-turn (the turn's batch either already ran or didn't).
 - The `ThinkingBlock` is recorded in the assistant turn but is only
   truly round-tripped by the messages wire format.
 - `MAX_TOOL_OUTPUT` (`20_000` chars) caps each tool result before it is
