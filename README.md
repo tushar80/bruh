@@ -1,7 +1,7 @@
 # bruh
 
 A minimal coding agent in Python. Talks to chat completions and messages
-APIs, driven by a tool-using planning loop. ~600 lines of Python, depends
+APIs, driven by a tool-using planning loop. ~1100 lines of Python, depends
 only on [httpx](https://www.python-httpx.org/) for streaming HTTP/SSE.
 
 Design and behavior are informed by [pi](https://pi.dev)
