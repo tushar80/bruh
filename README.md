@@ -3,6 +3,7 @@
 A minimal coding agent in Python. Talks to chat completions and messages
 APIs, driven by a tool-using planning loop. ~1100 lines of Python, depends
 only on [httpx](https://www.python-httpx.org/) for streaming HTTP/SSE.
+Licensed under the [MIT License](LICENSE).
 
 Design and behavior are informed by [pi](https://pi.dev)
 ([source](https://github.com/earendil-works/pi-mono)); bruh is a stripped-down Python port of the

@@ -2,10 +2,14 @@
 name = "bruh"
 version = "0.1.0"
 description = "A minimal coding agent over chat completions and messages APIs"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
 ]
+
+[project.urls]
+License = "https://opensource.org/license/mit"
 
 [project.scripts]
 bruh = "bruh.agent:main"
