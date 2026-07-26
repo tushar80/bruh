@@ -34,16 +34,18 @@ what you did.
 CONTEXT_FILE = "AGENTS.md"
 
 
-def _context_files(cwd: Path) -> list[Path]:
-    """AGENTS.md files: the home directory first, then cwd."""
+def _rule_files(cwd: Path) -> list[Path]:
+    """Rule files (AGENTS.md): home directory first, then cwd."""
     dirs = [Path.home(), cwd] if cwd != Path.home() else [cwd]
     return [d / CONTEXT_FILE for d in dirs if (d / CONTEXT_FILE).is_file()]
 
 
-def build_system_prompt() -> str:
+def build_system_prompt(*, include_rules: bool = False) -> str:
     cwd = Path(os.getcwd())
     prompt = SYSTEM_PROMPT + f"\nCurrent working directory: {cwd}\n"
-    files = _context_files(cwd)
+    if not include_rules:
+        return prompt
+    files = _rule_files(cwd)
     if not files:
         return prompt
     blocks = [

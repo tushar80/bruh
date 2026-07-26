@@ -61,6 +61,7 @@ class Agent:
         temperature: float = 0.7,
         max_steps: int = MAX_STEPS,
         verbose: bool = False,
+        include_rules: bool = False,
     ):
         self.provider = provider
         self.model = model
@@ -69,7 +70,7 @@ class Agent:
         self.max_steps = max_steps
         self.verbose = verbose
         self.messages: list[Message] = []
-        self.system_prompt = build_system_prompt()
+        self.system_prompt = build_system_prompt(include_rules=include_rules)
         self.tools = _build_tool_specs()
         self.last_usage: Usage | None = None
         self.last_usage_index: int = -1
@@ -308,6 +309,8 @@ def main() -> None:
     p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Max tool-call steps per turn")
     p.add_argument("-v", "--verbose", action="store_true", help="Print tool calls + thinking to stderr")
+    p.add_argument("--rules", dest="include_rules", action="store_true",
+                   help="Load AGENTS.md rule files (~/AGENTS.md and ./AGENTS.md)")
     args = p.parse_args()
 
     provider = _make_provider(args.provider)
@@ -318,6 +321,7 @@ def main() -> None:
         temperature=args.temperature,
         max_steps=args.max_steps,
         verbose=args.verbose,
+        include_rules=args.include_rules,
     )
 
     if args.prompt:
