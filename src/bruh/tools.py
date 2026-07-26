@@ -44,10 +44,10 @@ def tool_bash(command: str, workdir: str | None = None, timeout: int = 120) -> s
         )
         out = (proc.stdout or "") + (proc.stderr or "")
         if proc.returncode != 0:
-            out += f"\n[exit code {proc.returncode}]"
-        return _truncate(out) if out else f"[exit code {proc.returncode}, no output]"
+            return _truncate(f"[error: exit code {proc.returncode}]\n{out}")
+        return _truncate(out) if out else "[no output]"
     except subprocess.TimeoutExpired:
-        return f"[command timed out after {timeout}s]"
+        return f"[error: command timed out after {timeout}s]"
     except Exception as exc:  # noqa: BLE001
         return f"[error running command: {exc}]"
 
@@ -151,7 +151,7 @@ def tool_grep(
             return "[no matches]"
         return "\n".join(buf)
     except re.error as exc:
-        return f"[invalid regex: {exc}]"
+        return f"[error: invalid regex: {exc}]"
     except Exception as exc:  # noqa: BLE001
         return f"[error grepping: {exc}]"
 
@@ -272,10 +272,10 @@ TOOLS: dict[str, ToolFn] = {
 def run_tool(name: str, arguments: dict[str, Any]) -> str:
     fn = TOOLS.get(name)
     if fn is None:
-        return f"[unknown tool: {name}]"
+        return f"[error: unknown tool {name}]"
     try:
         return fn(**arguments)
     except TypeError as exc:
-        return f"[bad arguments for {name}: {exc}]"
+        return f"[error: bad arguments for {name}: {exc}]"
     except Exception as exc:  # noqa: BLE001
-        return f"[tool {name} crashed: {exc}]"
+        return f"[error: tool {name} crashed: {exc}]"
