@@ -9,7 +9,7 @@ behavior, the corresponding pi code is the reference.
 
 ## Quick orientation
 
-- ~1100 LOC, 3 modules under `src/bruh/`. Dependency: `httpx` only.
+- ~1200 LOC, 4 modules under `src/bruh/`. Dependency: `httpx` only.
 - Two streaming backends against the same base URL, selected via `--provider`:
   - `openai` (default) -> `{base}/chat/completions`
   - `anthropic`       -> `{base}/messages`
@@ -34,7 +34,7 @@ uv run bruh --provider anthropic --model minimax-m3 -p "..."
 No test suite yet. Verify changes by running the CLI and checking imports:
 
 ```bash
-uv run python -W error -c "import bruh.agent, bruh.providers, bruh.tools; print('ok')"
+uv run python -W error -c "import bruh.agent, bruh.prompts, bruh.providers, bruh.tools; print('ok')"
 uv run bruh --help
 ```
 
@@ -49,7 +49,8 @@ uv run bruh -p "Say exactly: ok"
 ```
 src/bruh/
   __init__.py
-  agent.py       Agent loop, argparse CLI, system prompt
+  agent.py       Agent loop, argparse CLI
+  prompts.py     System prompt assembly (base prompt, cwd)
   providers.py   chat-completions + messages streaming clients, token estimation
   tools.py       Tool implementations + JSON-schema registry (TOOL_SPECS)
 pyproject.toml   uv project; depends only on httpx

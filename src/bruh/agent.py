@@ -17,6 +17,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from .prompts import build_system_prompt
 from .providers import (
     AnthropicMessagesProvider,
     ContentBlock,
@@ -39,25 +40,6 @@ DEFAULT_MODEL = "glm-5.2"
 MAX_STEPS = 50
 MAX_TOOL_OUTPUT = 20_000
 TOOL_WORKERS = 8
-
-SYSTEM_PROMPT = """\
-You are a helpful coding agent operating in the user's local repository.
-
-You can run shell commands, read, write, and edit files, and search the codebase
-using the provided tools. Work step by step:
-
-1. Explore: read files, grep, glob, run bash to understand the task.
-2. Plan: briefly outline your approach before editing.
-3. Act: make edits with the write/edit tools.
-4. Verify: run tests / lint / the relevant command before declaring done.
-
-Be concise in your messages to the user. Prefer one tool call per step when
-exploring. When you have finished the task, respond with text (no tool call)
-describing what you did.
-
-Working directory is the current directory unless the user says otherwise.
-"""
-
 
 def _build_tool_specs() -> list[ToolSpec]:
     return [
@@ -87,6 +69,7 @@ class Agent:
         self.max_steps = max_steps
         self.verbose = verbose
         self.messages: list[Message] = []
+        self.system_prompt = build_system_prompt()
         self.tools = _build_tool_specs()
         self.last_usage: Usage | None = None
         self.last_usage_index: int = -1
@@ -104,7 +87,7 @@ class Agent:
         """Context estimate anchored to the last real provider usage when
         available; falls back to the chars/4 heuristic for everything."""
         if self.last_usage is None or self.last_usage_index < 0:
-            return estimate_context_tokens(self.messages, SYSTEM_PROMPT)
+            return estimate_context_tokens(self.messages, self.system_prompt)
         trailing = sum(
             estimate_tokens(msg) for msg in self.messages[self.last_usage_index + 1:]
         )
@@ -209,7 +192,7 @@ class Agent:
         turn_usage: Usage | None = None
 
         stream: Iterator[Event] = self.provider.stream(
-            system=SYSTEM_PROMPT,
+            system=self.system_prompt,
             messages=self.messages,
             tools=self.tools,
             model=self.model,
