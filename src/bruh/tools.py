@@ -9,7 +9,6 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
-import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,8 @@ from collections.abc import Callable
 MAX_READ_LINES = 2000
 MAX_OUTPUT_CHARS = 20_000
 MAX_RESULTS = 50
+SKIP_DIRS = {".git", ".venv", "__pycache__", "node_modules"}
+_SKIP_TEXT = ", ".join(sorted(SKIP_DIRS))
 
 ToolFn = Callable[..., str]
 
@@ -107,21 +108,32 @@ def tool_edit(file_path: str, old_string: str, new_string: str, replace_all: boo
         return f"[error editing file: {exc}]"
 
 
-def tool_grep(pattern: str, path: str = ".", include: str | None = None) -> str:
+def tool_grep(
+    pattern: str,
+    path: str = ".",
+    include: str | None = None,
+    ignore_case: bool = False,
+    literal: bool = False,
+    limit: int = MAX_RESULTS,
+) -> str:
     """Search file contents with a regex. Returns matches as path:line:content."""
     try:
-        regex = re.compile(pattern)
+        regex = re.compile(
+            re.escape(pattern) if literal else pattern,
+            re.IGNORECASE if ignore_case else 0,
+        )
         root = Path(path)
+        files: list[Path] = []
         if root.is_file():
             files = [root]
         else:
-            files = [p for p in root.rglob("*") if p.is_file()]
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+                files.extend(Path(dirpath) / name for name in filenames)
         buf: list[str] = []
         matches = 0
         for fp in files:
             if include and not fnmatch.fnmatch(fp.name, include):
-                continue
-            if ".git" in fp.parts:
                 continue
             try:
                 for lineno, line in enumerate(
@@ -130,8 +142,8 @@ def tool_grep(pattern: str, path: str = ".", include: str | None = None) -> str:
                     if regex.search(line):
                         buf.append(f"{fp}:{lineno}: {line[:2000]}")
                         matches += 1
-                        if matches >= MAX_RESULTS:
-                            buf.append(f"...[max {MAX_RESULTS} results reached]")
+                        if matches >= limit:
+                            buf.append(f"...[max {limit} results reached]")
                             return "\n".join(buf)
             except Exception:
                 continue
@@ -148,10 +160,10 @@ def tool_glob(pattern: str, path: str = ".") -> str:
     """Match file paths by glob pattern."""
     try:
         root = Path(path)
-        results = sorted(p for p in root.glob(pattern) if ".git" not in p.parts)
+        results = sorted(p for p in root.glob(pattern) if not SKIP_DIRS & set(p.parts))
         # Also support recursive ** when not present
         if not results and "**" not in pattern:
-            results = sorted(p for p in root.rglob(pattern) if ".git" not in p.parts)
+            results = sorted(p for p in root.rglob(pattern) if not SKIP_DIRS & set(p.parts))
         if not results:
             return "[no matches]"
         out = [str(p) for p in results[:MAX_RESULTS]]
@@ -219,20 +231,23 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "grep",
-        "description": f"Search file contents with a regex. Returns matches as path:line:content, limited to {MAX_RESULTS} matches.",
+        "description": f"Search file contents with a regex. Returns matches as path:line:content, limited to {MAX_RESULTS} matches by default. Skips {_SKIP_TEXT}.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "pattern": {"type": "string", "description": "Regex to search for."},
+                "pattern": {"type": "string", "description": "Regex to search for (literal text if literal is true)."},
                 "path": {"type": "string", "description": "Directory or file to search.", "default": "."},
                 "include": {"type": "string", "description": "Filename glob filter, e.g. '*.py'."},
+                "ignore_case": {"type": "boolean", "description": "Case-insensitive search.", "default": False},
+                "literal": {"type": "boolean", "description": "Treat pattern as literal text instead of regex.", "default": False},
+                "limit": {"type": "integer", "description": "Max matches to return.", "default": MAX_RESULTS},
             },
             "required": ["pattern"],
         },
     },
     {
         "name": "glob",
-        "description": f"Find files by glob pattern (e.g. 'src/**/*.py'), limited to {MAX_RESULTS} results.",
+        "description": f"Find files by glob pattern (e.g. 'src/**/*.py'), limited to {MAX_RESULTS} results. Skips {_SKIP_TEXT}.",
         "input_schema": {
             "type": "object",
             "properties": {
