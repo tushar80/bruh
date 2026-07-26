@@ -1,12 +1,12 @@
 # bruh
 
 A minimal coding agent in Python. Talks to chat completions and messages
-APIs, driven by a tool-using planning loop. ~1100 lines of Python, depends
+APIs, driven by a tool-using planning loop. ~1200 lines of Python, depends
 only on [httpx](https://www.python-httpx.org/) for streaming HTTP/SSE.
 Licensed under the [MIT License](LICENSE).
 
 Design and behavior are informed by [pi](https://pi.dev)
-([source](https://github.com/earendil-works/pi-mono)); bruh is a stripped-down Python port of the
+([source](https://github.com/earendil-works/pi)); bruh is a stripped-down Python port of the
 ideas there, not a feature-for-feature clone.
 
 ## What it does
@@ -68,7 +68,8 @@ Flags:
 ```
 src/bruh/
   __init__.py
-  agent.py       Agent loop, argparse CLI, system prompt
+  agent.py       Agent loop, argparse CLI
+  prompts.py     System prompt assembly (base prompt, cwd, AGENTS.md context)
   providers.py   chat-completions + messages streaming clients, token estimation
   tools.py       Tool implementations and the JSON-schema registry
 pyproject.toml   uv project; depends only on httpx
