@@ -1,8 +1,9 @@
-"""System prompt assembly: base prompt, guidelines, working directory."""
+"""System prompt assembly: base prompt, guidelines, project context."""
 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 SYSTEM_PROMPT = """\
 You are an expert coding assistant operating in the user's local repository.
@@ -30,6 +31,26 @@ When you have finished the task, respond with text (no tool call) describing
 what you did.
 """
 
+CONTEXT_FILE = "AGENTS.md"
+
+
+def _context_files(cwd: Path) -> list[Path]:
+    """AGENTS.md files from the filesystem root down to cwd (nearest last)."""
+    dirs = [cwd, *cwd.parents]
+    return [d / CONTEXT_FILE for d in reversed(dirs) if (d / CONTEXT_FILE).is_file()]
+
 
 def build_system_prompt() -> str:
-    return SYSTEM_PROMPT + f"\nCurrent working directory: {os.getcwd()}\n"
+    cwd = Path(os.getcwd())
+    prompt = SYSTEM_PROMPT + f"\nCurrent working directory: {cwd}\n"
+    files = _context_files(cwd)
+    if not files:
+        return prompt
+    blocks = [
+        f'<project_instructions path="{p}">\n'
+        f'{p.read_text(encoding="utf-8", errors="replace")}\n'
+        f"</project_instructions>"
+        for p in files
+    ]
+    prompt += "\n<project_context>\n\nProject-specific instructions and guidelines:\n\n"
+    return prompt + "\n\n".join(blocks) + "\n\n</project_context>\n"
