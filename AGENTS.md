@@ -97,6 +97,8 @@ Both providers serialize `Message`s to their wire format in `_build_messages`.
   in-flight tool calls, keeps any streamed text); the session continues.
   Bash subprocesses started by a tool are *not* cancelled — the turn's tool
   batch either already ran or didn't. See `Agent._stream_step`.
+  Ctrl+C during tool execution substitutes `[error: aborted]` results so
+  every tool_use still has a matching tool_result.
 
 ## Things NOT to do
 

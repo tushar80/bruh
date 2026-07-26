@@ -125,11 +125,17 @@ class Agent:
                     )
             return result
 
-        if len(calls) == 1:
-            ordered: list[str] = [_run_one(calls[0])]
-        else:
-            with ThreadPoolExecutor(max_workers=TOOL_WORKERS) as pool:
-                ordered = list(pool.map(_run_one, calls))
+        try:
+            if len(calls) == 1:
+                ordered: list[str] = [_run_one(calls[0])]
+            else:
+                with ThreadPoolExecutor(max_workers=TOOL_WORKERS) as pool:
+                    ordered = list(pool.map(_run_one, calls))
+        except KeyboardInterrupt:
+            # Substitute error results so every tool_use still gets a
+            # tool_result; the messages API rejects dangling tool calls.
+            print("\n[aborted]", file=sys.stderr)
+            ordered = ["[error: aborted]"] * len(calls)
 
         results: list[ContentBlock] = []
         for call, text in zip(calls, ordered):
