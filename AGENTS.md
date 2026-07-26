@@ -90,7 +90,7 @@ Both providers serialize `Message`s to their wire format in `_build_messages`.
 ## Known limitations (intentional, not bugs)
 
 - No context compaction. Watch the verbose token estimate and start a new session when it gets large.
-- `ThinkingBlock` is stored but only round-tripped by the Anthropic messages provider.
+- Streamed thinking is shown in verbose mode but never stored in history.
 - `MAX_TOOL_OUTPUT` (20_000 chars) caps each tool result before feeding back to the model.
 - No permissions system; tools run with the launching user's privileges.
 - A `KeyboardInterrupt` mid-stream aborts the current turn cleanly (drops

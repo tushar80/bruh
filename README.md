@@ -79,8 +79,7 @@ pyproject.toml   uv project; depends only on httpx
 
 - Tools within a turn run in parallel; bash subprocesses are not cancelled
   if you Ctrl+C mid-turn (the turn's batch either already ran or didn't).
-- The `ThinkingBlock` is recorded in the assistant turn but is only
-  truly round-tripped by the messages wire format.
+- Streamed thinking is shown in verbose mode but never stored in history.
 - `MAX_TOOL_OUTPUT` (`20_000` chars) caps each tool result before it is
   fed back to the model, to keep history bounded.
 - If the model calls a tool repeatedly without finishing,

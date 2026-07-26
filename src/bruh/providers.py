@@ -259,7 +259,20 @@ class OpenAICompletionsProvider:
                 return
 
             for chunk in _parse_sse_lines(resp.iter_lines()):
-                choice = (chunk.get("choices") or [{}])[0]
+                choices = chunk.get("choices") or []
+                usage_raw = chunk.get("usage")
+                if usage_raw and not choices:
+                    # stream_options.include_usage sends usage in a final
+                    # choices-less chunk after the finish chunk.
+                    yield Event(
+                        type="done",
+                        usage=Usage(
+                            input_tokens=usage_raw.get("prompt_tokens", 0),
+                            output_tokens=usage_raw.get("completion_tokens", 0),
+                        ),
+                    )
+                    continue
+                choice = choices[0] if choices else {}
                 delta = choice.get("delta") or {}
 
                 # Reasoning/reasoning_content field (some providers use "reasoning")
@@ -471,7 +484,7 @@ class AnthropicMessagesProvider:
                 if isinstance(block, TextBlock):
                     blocks.append({"type": "text", "text": block.text})
                 elif isinstance(block, ThinkingBlock):
-                    blocks.append({"type": "thinking", "thinking": block.text, "signature": block.signature})
+                    blocks.append({"type": "thinking", "thinking": block.thinking, "signature": block.signature})
                 elif isinstance(block, ToolUseBlock):
                     blocks.append({
                         "type": "tool_use",
