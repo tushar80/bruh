@@ -10,6 +10,7 @@ import fnmatch
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
@@ -30,6 +31,18 @@ def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     return kept + f"\n...[truncated {len(text) - limit} chars]"
 
 
+def _truncate_tail(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
+    """Keep the tail of long command output, where errors usually are; the
+    full text is saved to a temp file so it can be read or grepped."""
+    if len(text) <= limit:
+        return text
+    fd, path = tempfile.mkstemp(prefix="bruh-", suffix=".log", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    kept = text[-limit:]
+    return f"[...truncated {len(text) - limit} chars; full output saved to {path}]\n{kept}"
+
+
 def tool_bash(command: str, workdir: str | None = None, timeout: int = 120) -> str:
     """Run a shell command and return combined stdout+stderr."""
     cwd = workdir or os.getcwd()
@@ -44,8 +57,8 @@ def tool_bash(command: str, workdir: str | None = None, timeout: int = 120) -> s
         )
         out = (proc.stdout or "") + (proc.stderr or "")
         if proc.returncode != 0:
-            return _truncate(f"[error: exit code {proc.returncode}]\n{out}")
-        return _truncate(out) if out else "[no output]"
+            return _truncate_tail(f"[error: exit code {proc.returncode}]\n{out}")
+        return _truncate_tail(out) if out else "[no output]"
     except subprocess.TimeoutExpired:
         return f"[error: command timed out after {timeout}s]"
     except Exception as exc:  # noqa: BLE001
@@ -69,7 +82,10 @@ def tool_read(file_path: str, offset: int = 1, limit: int = MAX_READ_LINES) -> s
             buf.append(f"{i}: {line}")
         if not buf:
             return "[file is empty]"
-        return "\n".join(buf)
+        text = "\n".join(buf)
+        if len(text) > MAX_OUTPUT_CHARS:
+            text = text[:MAX_OUTPUT_CHARS] + "\n...[truncated; use offset to continue]"
+        return text
     except Exception as exc:  # noqa: BLE001
         return f"[error reading file: {exc}]"
 
@@ -179,7 +195,7 @@ def tool_glob(pattern: str, path: str = ".") -> str:
 TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "bash",
-        "description": f"Run a shell command. Returns stdout+stderr, truncated to {MAX_OUTPUT_CHARS} chars. Use for running tests, git, builds, etc.",
+        "description": f"Run a shell command. Returns stdout+stderr; output longer than {MAX_OUTPUT_CHARS} chars keeps the tail and saves the full output to a temp file. Use for running tests, git, builds, etc.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -192,7 +208,7 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "read",
-        "description": f"Read a file. Returns lines prefixed with 1-indexed line numbers, at most {MAX_READ_LINES} lines per call. Use offset/limit to page through large files until complete.",
+        "description": f"Read a file. Returns lines prefixed with 1-indexed line numbers, at most {MAX_READ_LINES} lines or {MAX_OUTPUT_CHARS} chars per call. Use offset/limit to page through large files until complete.",
         "input_schema": {
             "type": "object",
             "properties": {
