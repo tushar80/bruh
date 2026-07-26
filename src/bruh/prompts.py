@@ -35,9 +35,9 @@ CONTEXT_FILE = "AGENTS.md"
 
 
 def _context_files(cwd: Path) -> list[Path]:
-    """AGENTS.md files from the filesystem root down to cwd (nearest last)."""
-    dirs = [cwd, *cwd.parents]
-    return [d / CONTEXT_FILE for d in reversed(dirs) if (d / CONTEXT_FILE).is_file()]
+    """AGENTS.md files: the home directory first, then cwd."""
+    dirs = [Path.home(), cwd] if cwd != Path.home() else [cwd]
+    return [d / CONTEXT_FILE for d in dirs if (d / CONTEXT_FILE).is_file()]
 
 
 def build_system_prompt() -> str:
