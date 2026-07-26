@@ -167,12 +167,12 @@ def tool_glob(pattern: str, path: str = ".") -> str:
 TOOL_SPECS: list[dict[str, Any]] = [
     {
         "name": "bash",
-        "description": "Run a shell command. Returns stdout+stderr. Use for running tests, git, etc.",
+        "description": f"Run a shell command. Returns stdout+stderr, truncated to {MAX_OUTPUT_CHARS} chars. Use for running tests, git, builds, etc.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "The shell command to execute."},
-                "workdir": {"type": "string", "description": "Working directory (optional)."},
+                "workdir": {"type": "string", "description": "Working directory (default: current directory)."},
                 "timeout": {"type": "integer", "description": "Timeout in seconds.", "default": 120},
             },
             "required": ["command"],
@@ -180,11 +180,11 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "read",
-        "description": "Read a file. Returns lines prefixed with 1-indexed line numbers.",
+        "description": f"Read a file. Returns lines prefixed with 1-indexed line numbers, at most {MAX_READ_LINES} lines per call. Use offset/limit to page through large files until complete.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string"},
+                "file_path": {"type": "string", "description": "Path to the file (relative or absolute)."},
                 "offset": {"type": "integer", "description": "1-indexed line to start at.", "default": 1},
                 "limit": {"type": "integer", "description": "Max lines to read.", "default": MAX_READ_LINES},
             },
@@ -193,38 +193,38 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "write",
-        "description": "Write content to a file (overwrites if exists).",
+        "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories. Use only for new files or complete rewrites; use edit for targeted changes.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string"},
-                "content": {"type": "string"},
+                "file_path": {"type": "string", "description": "Path to the file (relative or absolute)."},
+                "content": {"type": "string", "description": "Content to write."},
             },
             "required": ["file_path", "content"],
         },
     },
     {
         "name": "edit",
-        "description": "Replace an exact string in a file. Use more context to disambiguate.",
+        "description": "Replace an exact string in a file. old_string must match exactly and be unique in the file unless replace_all is set. Keep old_string as small as possible while staying unique; add surrounding context to disambiguate.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "file_path": {"type": "string"},
-                "old_string": {"type": "string"},
-                "new_string": {"type": "string"},
-                "replace_all": {"type": "boolean", "default": False},
+                "file_path": {"type": "string", "description": "Path to the file (relative or absolute)."},
+                "old_string": {"type": "string", "description": "Exact text to replace."},
+                "new_string": {"type": "string", "description": "Replacement text."},
+                "replace_all": {"type": "boolean", "description": "Replace all occurrences.", "default": False},
             },
             "required": ["file_path", "old_string", "new_string"],
         },
     },
     {
         "name": "grep",
-        "description": "Search file contents with a regex pattern.",
+        "description": f"Search file contents with a regex. Returns matches as path:line:content, limited to {MAX_RESULTS} matches.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "pattern": {"type": "string", "description": "Regex to search for."},
-                "path": {"type": "string", "default": "."},
+                "path": {"type": "string", "description": "Directory or file to search.", "default": "."},
                 "include": {"type": "string", "description": "Filename glob filter, e.g. '*.py'."},
             },
             "required": ["pattern"],
@@ -232,12 +232,12 @@ TOOL_SPECS: list[dict[str, Any]] = [
     },
     {
         "name": "glob",
-        "description": "Find files by glob pattern (e.g. 'src/**/*.py').",
+        "description": f"Find files by glob pattern (e.g. 'src/**/*.py'), limited to {MAX_RESULTS} results.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "pattern": {"type": "string"},
-                "path": {"type": "string", "default": "."},
+                "pattern": {"type": "string", "description": "Glob pattern to match."},
+                "path": {"type": "string", "description": "Directory to search in.", "default": "."},
             },
             "required": ["pattern"],
         },
