@@ -9,7 +9,7 @@ behavior, the corresponding pi code is the reference.
 
 ## Quick orientation
 
-- ~1200 LOC, 4 modules under `src/bruh/`. Dependency: `httpx` only.
+- ~1600 LOC, 5 modules under `src/bruh/`. Dependency: `httpx` only.
 - Two streaming backends against the same base URL, selected via `--provider`:
   - `openai` (default) -> `{base}/chat/completions`
   - `anthropic`       -> `{base}/messages`
@@ -26,7 +26,7 @@ behavior, the corresponding pi code is the reference.
 ```bash
 uv sync                    # install httpx into .venv
 uv run bruh --help
-uv run bruh -v             # interactive, verbose (thinking + tools + token estimate to stderr)
+uv run bruh -v             # interactive, verbose (adds thinking, token estimate, untruncated tool output)
 uv run bruh -p "prompt"    # one-shot, non-interactive
 uv run bruh --provider anthropic --model minimax-m3 -p "..."
 ```
@@ -52,6 +52,7 @@ src/bruh/
   agent.py       Agent loop, argparse CLI
   prompts.py     System prompt assembly (base prompt, cwd, AGENTS.md context)
   providers.py   chat-completions + messages streaming clients, token estimation
+  render.py      Terminal presentation (ANSI theme, tool-call blocks)
   tools.py       Tool implementations + JSON-schema registry (TOOL_SPECS)
 pyproject.toml   uv project; depends only on httpx
 ```
@@ -77,6 +78,29 @@ Both providers serialize `Message`s to their wire format in `_build_messages`.
 ### Token estimation
 
 `estimate_tokens(message)` and `estimate_context_tokens(messages, system)` use a chars/4 heuristic (conservative overestimate). When a provider reports real usage in an `Event`, the agent anchors on that number (`Agent.last_usage`) and only estimates the *trailing* messages added since. Surfaced in verbose mode after each tool turn. No compaction logic; message history grows unbounded.
+
+### Display
+
+`render.py` owns every byte a human reads; no other module formats output. The look follows pi's
+interactive mode: each tool call is a full-width block, one header row tinted `header_bg` (bold verb +
+accent-colored primary arg, `$ cmd` for bash) followed by result rows tinted green on success or red on
+error, then a footer row with `exit N` and elapsed time.
+
+- `fg()` resets with `\x1b[39m` and `bg()` with `\x1b[49m`, never `\x1b[0m`, so a colored line inside a
+  tinted block cannot wipe the block's background mid-row. Keep it that way.
+- Tool blocks are shown unconditionally; `-v` adds thinking, the token estimate, and lifts the per-tool
+  preview budget (`PREVIEW_LINES`: bash keeps the last 5 lines, grep/glob the first 10; read/write/edit
+  collapse to a one-line summary).
+- Preview elision is `muted`; truncation the model also saw (`[...truncated ...]`, `...[max N results
+  reached]`) is `warning`. `_summary` and `_ERROR_RE` parse the return strings in `tools.py`, so changing
+  those strings means updating `render.py`.
+- Color turns off for a non-tty stderr, `NO_COLOR`, `TERM=dumb`, or `FORCE_COLOR=0`, and blocks degrade to
+  plain indented lines with no padding, which is what makes `2> run.log` readable. Truecolor needs
+  `COLORTERM=truecolor`, otherwise a 256-color palette is used.
+- Reasoning streams to stderr with no trailing newline, so `Renderer._close_thinking` has to run before
+  anything else prints or the answer starts mid-line.
+- stdout carries only model text. Everything else goes to stderr, and `_out`/`_err` flush the other stream
+  first so the two do not interleave mid-line on a tty.
 
 ## Code conventions
 

@@ -12,11 +12,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import threading
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from . import render
 from .prompts import build_system_prompt
 from .providers import (
     AnthropicMessagesProvider,
@@ -69,6 +70,7 @@ class Agent:
         self.temperature = temperature
         self.max_steps = max_steps
         self.verbose = verbose
+        self.out = render.Renderer(verbose=verbose)
         self.messages: list[Message] = []
         self.system_prompt = build_system_prompt(include_rules=include_rules)
         self.tools = _build_tool_specs()
@@ -94,9 +96,7 @@ class Agent:
         )
         return self.last_usage.total_tokens + trailing
 
-    def _execute_tool_turn(
-        self, new_blocks: list[ContentBlock], step: int,
-    ) -> list[ContentBlock]:
+    def _execute_tool_turn(self, new_blocks: list[ContentBlock]) -> list[ContentBlock]:
         """Run every ToolUseBlock in ``new_blocks`` concurrently and return
         ToolResultBlock list in the same order as the tool_use blocks appeared
         on the wire. Bash/reads are I/O-bound, so threads suffice; order is
@@ -107,27 +107,29 @@ class Agent:
         ]
         if not calls:
             return []
-        if self.verbose:
-            names = ", ".join(c.name for c in calls)
-            print(f"\n[step {step}] running {len(calls)} tool(s) in parallel: {names}",
-                  file=sys.stderr)
-
-        verbose_lock = threading.Lock() if self.verbose else None
+        # With one call the header goes out before the tool runs, so a slow
+        # command is visible while it works. A batch has to buffer each block
+        # until it completes, or the headers and bodies interleave.
+        single = len(calls) == 1
+        if single:
+            self.out.tool_header(calls[0].name, calls[0].arguments)
+        else:
+            self.out.parallel_note(len(calls))
 
         def _run_one(call: ToolUseBlock) -> str:
+            started = time.monotonic()
             result = run_tool(call.name, call.arguments)
-            if self.verbose and verbose_lock is not None:
-                snippet = result[:300].replace("\n", "\n  ")
-                with verbose_lock:
-                    print(
-                        f"  -> {call.name} ({call.id}): "
-                        f"{snippet}{'...' if len(result) > 300 else ''}",
-                        file=sys.stderr,
-                    )
+            self.out.tool_result(
+                call.name,
+                call.arguments,
+                result,
+                time.monotonic() - started,
+                header_done=single,
+            )
             return result
 
         try:
-            if len(calls) == 1:
+            if single:
                 ordered: list[str] = [_run_one(calls[0])]
             else:
                 with ThreadPoolExecutor(max_workers=TOOL_WORKERS) as pool:
@@ -135,7 +137,7 @@ class Agent:
         except KeyboardInterrupt:
             # Substitute error results so every tool_use still gets a
             # tool_result; the messages API rejects dangling tool calls.
-            print("\n[aborted]", file=sys.stderr)
+            self.out.warn("aborted")
             ordered = ["[error: aborted]"] * len(calls)
 
         results: list[ContentBlock] = []
@@ -164,25 +166,20 @@ class Agent:
 
             if not did_tools:
                 # assistant finished with a plain message (or turn was aborted)
-                if self.verbose:
-                    print(f"\n[step {step}] assistant done ({stop})", file=sys.stderr)
+                self.out.debug(f"step {step} done ({stop})")
                 break
 
-            if self.verbose:
-                total = self._context_tokens()
-                if self.last_usage is not None:
-                    print(
-                        f"[~{total} tokens in context (real: {self.last_usage.total_tokens})]",
-                        file=sys.stderr,
-                    )
-                else:
-                    print(f"[~{total} tokens in context]", file=sys.stderr)
+            self.out.tokens(
+                self._context_tokens(),
+                self.last_usage.total_tokens if self.last_usage is not None else None,
+            )
 
             # Execute every tool call from this turn (in parallel)
-            tool_results = self._execute_tool_turn(new_blocks, step)
+            tool_results = self._execute_tool_turn(new_blocks)
             if tool_results:
                 self.messages.append(Message(role="user", content=tool_results))
         else:
+            self.out.warn("reached max steps")
             final_text_parts.append("\n[reached max steps]")
 
         return "\n".join(final_text_parts)
@@ -191,7 +188,6 @@ class Agent:
         """One provider round-trip with streaming. Returns:
         (assistant_blocks, stop_reason, seen_text, had_tool_calls, turn_usage)."""
         text_buf = ""
-        thinking_shown = False
         tool_calls: dict[str, dict[str, Any]] = {}
         stop_reason = ""
         had_error = False
@@ -210,20 +206,13 @@ class Agent:
         try:
             for ev in stream:
                 if ev.type == "thinking":
-                    if ev.text:
-                        if self.verbose and not thinking_shown:
-                            print("\n[thinking] ", end="", file=sys.stderr, flush=True)
-                            thinking_shown = True
-                        if self.verbose:
-                            print(ev.text, end="", file=sys.stderr, flush=True)
+                    self.out.thinking(ev.text)
                 elif ev.type == "text":
                     if ev.text:
-                        print(ev.text, end="", flush=True)
+                        self.out.text(ev.text)
                         text_buf += ev.text
                         seen_text_parts.append(ev.text)
                 elif ev.type == "tool_start":
-                    if self.verbose:
-                        print(f"\n[tool: {ev.tool_name} ({ev.tool_id})]", file=sys.stderr)
                     tool_calls[ev.tool_id] = {"name": ev.tool_name, "args": ""}
                 elif ev.type == "tool_delta":
                     if ev.tool_id in tool_calls and ev.tool_args_json:
@@ -240,16 +229,18 @@ class Agent:
                     if ev.usage is not None:
                         turn_usage = merge_usage(turn_usage, ev.usage)
                 elif ev.type == "error":
-                    print(f"\n[error] {ev.error}", file=sys.stderr)
+                    self.out.error(ev.error)
                     had_error = True
         except KeyboardInterrupt:
             # Ctrl+C during streaming: abort the turn but keep the session alive.
             # httpx.stream's context manager closes the underlying request on the
             # way out. Drop in-flight tool calls so we don't leave the assistant
             # message with a tool_use that has no matching tool_result.
-            print("\n[aborted]", file=sys.stderr)
+            self.out.warn("aborted")
             stop_reason = "aborted"
             tool_calls = {}
+
+        self.out.end_text()
 
         if had_error and not tool_calls and not text_buf:
             return [], stop_reason, "", False, turn_usage
@@ -268,9 +259,6 @@ class Agent:
                     args = {"_raw": raw, "_error": "invalid JSON arguments"}
             new_blocks.append(ToolUseBlock(id=tool_id, name=entry["name"], arguments=args))
 
-        if text_buf:
-            print()  # newline after streamed text
-
         return new_blocks, stop_reason, text_buf, len(tool_calls) > 0, turn_usage
 
 
@@ -284,7 +272,7 @@ def _make_provider(fmt: str) -> OpenAICompletionsProvider | AnthropicMessagesPro
     api_key = cfg["api_key"] or ""
     base_url = cfg["base_url"] or "https://opencode.ai/zen/go/v1"
     if not api_key:
-        print("error: set BRUH_API_KEY before running", file=sys.stderr)
+        print(render.fg("error", "error: set BRUH_API_KEY before running"), file=sys.stderr)
         sys.exit(2)
     if fmt == "anthropic":
         return AnthropicMessagesProvider(api_key, base_url)
@@ -328,17 +316,18 @@ def main() -> None:
         agent.run(args.prompt)
         return
 
-    print("bruh ready. ^D to exit.\n", file=sys.stderr)
+    agent.out.banner("bruh ready. ^D to exit.")
     while True:
         try:
-            line = input("you> ")
+            line = input(agent.out.prompt())
         except (EOFError, KeyboardInterrupt):
-            print("\nbye.", file=sys.stderr)
+            agent.out.turn_break()
+            agent.out.banner("bye.")
             return
         if not line.strip():
             continue
         agent.run(line)
-        print(file=sys.stderr)
+        agent.out.turn_break()
 
 
 if __name__ == "__main__":
