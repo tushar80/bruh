@@ -97,14 +97,17 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _RESET = "\x1b[39m\x1b[22m\x1b[23m"
 _INVALID = fg("error", "[invalid arg]")
 
-# These four mirror return strings in tools.py; changing those means changing these.
+# These mirror return strings in tools.py; changing those means changing these.
 _EXIT_RE = re.compile(r"^\[error: exit code (\d+)\]\n?")
 _ERROR_RE = re.compile(r"^\[error:? ?(.*)\]$")
 _WROTE_RE = re.compile(r"^\[wrote (\d+ bytes) to .*\]$")
 _EDITED_RE = re.compile(r"^\[edited .*: (\d+ replacement\(s\))\]$")
 _TRUNC_RE = re.compile(r"^(\.\.\.)?\[(\.\.\.)?(truncated|max \d+|\d+ matches)")
 
-HEAD_ONLY = ("read", "write", "edit")  # result collapses to a one-line summary
+# pi hides read results until expanded; bruh has no expand, so the header
+# (path + range) stands alone and -v is the way to see the contents.
+HIDE_BODY = ("read",)
+HEAD_ONLY = ("write", "edit")  # result collapses to a one-line summary
 TAIL_PREVIEW = ("bash",)  # keep the end of the output, where failures are
 PREVIEW_LINES = {"bash": 5}
 DEFAULT_PREVIEW = 10
@@ -223,11 +226,9 @@ def _header(name: str, args: dict[str, Any]) -> str:
 
 
 def _summary(name: str, body: str) -> str:
-    """Collapse a read/write/edit result to one line. The path is already in the
+    """Collapse a write/edit result to one line. The path is already in the
     header, so only the part that varies survives."""
     text = body.strip()
-    if name == "read":
-        return text if text.startswith("[") else f"{len(body.splitlines())} lines"
     match = (_WROTE_RE if name == "write" else _EDITED_RE).match(text)
     return match.group(1) if match else text
 
@@ -250,6 +251,8 @@ def _preview(name: str, body: str, is_error: bool, verbose: bool) -> tuple[list[
     lines = body.splitlines() or [""]
     if verbose:
         return lines, ""
+    if not is_error and name in HIDE_BODY:
+        return [], ""
     if not is_error and name in HEAD_ONLY:
         return [_summary(name, body)], ""
     budget = DEFAULT_PREVIEW if is_error else PREVIEW_LINES.get(name, DEFAULT_PREVIEW)

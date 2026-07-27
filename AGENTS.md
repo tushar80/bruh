@@ -89,8 +89,8 @@ error, then a footer row with `exit N` and elapsed time.
 - `fg()` resets with `\x1b[39m` and `bg()` with `\x1b[49m`, never `\x1b[0m`, so a colored line inside a
   tinted block cannot wipe the block's background mid-row. Keep it that way.
 - Tool blocks are shown unconditionally; `-v` adds thinking, the token estimate, and lifts the per-tool
-  preview budget (`PREVIEW_LINES`: bash keeps the last 5 lines, grep/glob the first 10; read/write/edit
-  collapse to a one-line summary).
+  preview budget (`PREVIEW_LINES`: bash keeps the last 5 lines, grep/glob the first 10; read shows only
+  its header, write/edit collapse to a one-line summary).
 - Preview elision is `muted`; truncation the model also saw (`[...truncated ...]`, `...[max N results
   reached]`) is `warning`. `_summary` and `_ERROR_RE` parse the return strings in `tools.py`, so changing
   those strings means updating `render.py`.
