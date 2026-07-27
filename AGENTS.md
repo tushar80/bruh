@@ -114,7 +114,9 @@ error, then a footer row with `exit N` and elapsed time.
 ## Known limitations (intentional, not bugs)
 
 - No context compaction. Watch the verbose token estimate and start a new session when it gets large.
-- Streamed thinking is shown in verbose mode but never stored in history.
+- Thinking display is verbose-only. The Anthropic provider requests thinking
+  (`budget_tokens: 1024`) and the blocks stay in history: the messages API
+  rejects a follow-up turn that drops a thinking block or its signature.
 - `MAX_TOOL_OUTPUT` (20_000 chars) caps each tool result before feeding back to the model.
 - No permissions system; tools run with the launching user's privileges.
 - A `KeyboardInterrupt` mid-stream aborts the current turn cleanly (drops

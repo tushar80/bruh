@@ -138,6 +138,7 @@ class Event:
     stop_reason: str = ""
     usage: Usage | None = None
     error: str = ""
+    signature: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -155,7 +156,7 @@ class Provider(Protocol):
         tools: list[ToolSpec],
         model: str,
         max_tokens: int,
-        temperature: float,
+        temperature: float | None,
     ) -> Iterator[Event]: ...
 
 
@@ -219,17 +220,18 @@ class OpenAICompletionsProvider:
         tools: list[ToolSpec],
         model: str,
         max_tokens: int = 8192,
-        temperature: float = 0.7,
+        temperature: float | None = None,
     ) -> Iterator[Event]:
         url = f"{self.base_url}/chat/completions"
         payload: dict[str, Any] = {
             "model": model,
             "messages": self._build_messages(system, messages),
-            "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if temperature is not None:
+            payload["temperature"] = temperature
         if tools:
             payload["tools"] = [
                 {
@@ -379,16 +381,19 @@ class AnthropicMessagesProvider:
         tools: list[ToolSpec],
         model: str,
         max_tokens: int = 8192,
-        temperature: float = 0.7,
+        temperature: float | None = None,
     ) -> Iterator[Event]:
         url = f"{self.base_url}/messages"
         payload: dict[str, Any] = {
             "model": model,
             "messages": self._build_messages(messages),
             "max_tokens": max_tokens,
-            "temperature": temperature,
             "stream": True,
+            # Without this, models that support extended thinking emit none.
+            "thinking": {"type": "enabled", "budget_tokens": 1024},
         }
+        if temperature is not None:
+            payload["temperature"] = temperature
         if system:
             payload["system"] = system
         if tools:
@@ -397,7 +402,8 @@ class AnthropicMessagesProvider:
                 for t in tools
             ]
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "x-api-key": self.api_key,
+            "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         }
 
@@ -409,6 +415,8 @@ class AnthropicMessagesProvider:
 
             current_tool_id: str | None = None
             current_tool_json = ""
+            in_thinking = False
+            thinking_sig = ""
 
             for chunk in _parse_sse_lines(resp.iter_lines()):
                 etype = chunk.get("type", "")
@@ -424,6 +432,9 @@ class AnthropicMessagesProvider:
                             tool_id=current_tool_id,
                             tool_name=block.get("name", ""),
                         )
+                    elif btype == "thinking":
+                        in_thinking = True
+                        thinking_sig = ""
                 elif etype == "content_block_delta":
                     delta = chunk.get("delta", {})
                     dtype = delta.get("type")
@@ -431,6 +442,8 @@ class AnthropicMessagesProvider:
                         yield Event(type="text", text=delta.get("text", ""))
                     elif dtype == "thinking_delta":
                         yield Event(type="thinking", text=delta.get("thinking", ""))
+                    elif dtype == "signature_delta":
+                        thinking_sig += delta.get("signature", "")
                     elif dtype == "input_json_delta":
                         current_tool_json += delta.get("partial_json", "")
                         if current_tool_id:
@@ -441,6 +454,9 @@ class AnthropicMessagesProvider:
                             )
 
                 elif etype == "content_block_stop":
+                    if in_thinking:
+                        yield Event(type="thinking", signature=thinking_sig)
+                        in_thinking = False
                     if current_tool_id:
                         yield Event(
                             type="tool_end",

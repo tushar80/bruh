@@ -27,6 +27,7 @@ from .providers import (
     Message,
     OpenAICompletionsProvider,
     TextBlock,
+    ThinkingBlock,
     ToolResultBlock,
     ToolSpec,
     ToolUseBlock,
@@ -60,7 +61,7 @@ class Agent:
         provider: OpenAICompletionsProvider | AnthropicMessagesProvider,
         model: str = DEFAULT_MODEL,
         max_tokens: int = 8192,
-        temperature: float = 0.7,
+        temperature: float | None = None,
         max_steps: int = MAX_STEPS,
         verbose: bool = False,
         include_rules: bool = False,
@@ -189,6 +190,8 @@ class Agent:
         """One provider round-trip with streaming. Returns:
         (assistant_blocks, stop_reason, seen_text, had_tool_calls, turn_usage)."""
         text_buf = ""
+        thinking_buf = ""
+        thinking_sig = ""
         tool_calls: dict[str, dict[str, Any]] = {}
         stop_reason = ""
         had_error = False
@@ -208,6 +211,8 @@ class Agent:
             for ev in stream:
                 if ev.type == "thinking":
                     self.out.thinking(ev.text)
+                    thinking_buf += ev.text
+                    thinking_sig = ev.signature or thinking_sig
                 elif ev.type == "text":
                     if ev.text:
                         self.out.text(ev.text)
@@ -246,8 +251,12 @@ class Agent:
         if had_error and not tool_calls and not text_buf:
             return [], stop_reason, "", False, turn_usage
 
-        # Build assistant content blocks for history
+        # Build assistant content blocks for history. Thinking goes first:
+        # the messages API requires it back (with its signature) on any turn
+        # that follows a thinking-enabled response.
         new_blocks: list[ContentBlock] = []
+        if thinking_buf:
+            new_blocks.append(ThinkingBlock(thinking=thinking_buf, signature=thinking_sig))
         if text_buf:
             new_blocks.append(TextBlock(text=text_buf))
         for tool_id, entry in tool_calls.items():
@@ -295,7 +304,9 @@ def main() -> None:
                         "Anthropic-format models: minimax-m3/m2.7/m2.5, qwen3.7-max/plus, qwen3.6-plus "
                         "(use --provider anthropic).")
     p.add_argument("--max-tokens", type=int, default=8192)
-    p.add_argument("--temperature", type=float, default=0.7)
+    p.add_argument("--temperature", type=float, default=None,
+                   help="Sampling temperature; omitted from the request unless set "
+                        "(some models, e.g. kimi-k3, only accept their own default)")
     p.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Max tool-call steps per turn")
     p.add_argument("-v", "--verbose", action="store_true", help="Print tool calls + thinking to stderr")
     p.add_argument("--rules", dest="include_rules", action="store_true",
