@@ -24,13 +24,6 @@ _SKIP_TEXT = ", ".join(sorted(SKIP_DIRS))
 ToolFn = Callable[..., str]
 
 
-def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
-    if len(text) <= limit:
-        return text
-    kept = text[:limit]
-    return kept + f"\n...[truncated {len(text) - limit} chars]"
-
-
 def _truncate_tail(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     """Keep the tail of long command output, where errors usually are; the
     full text is saved to a temp file so it can be read or grepped."""

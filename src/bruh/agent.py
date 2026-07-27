@@ -20,6 +20,7 @@ from typing import Any
 from . import render
 from .prompts import build_system_prompt
 from .providers import (
+    DEFAULT_BASE_URL,
     AnthropicMessagesProvider,
     ContentBlock,
     Event,
@@ -270,7 +271,7 @@ class Agent:
 def _make_provider(fmt: str) -> OpenAICompletionsProvider | AnthropicMessagesProvider:
     cfg = get_config()
     api_key = cfg["api_key"] or ""
-    base_url = cfg["base_url"] or "https://opencode.ai/zen/go/v1"
+    base_url = cfg["base_url"] or DEFAULT_BASE_URL
     if not api_key:
         print(render.fg("error", "error: set BRUH_API_KEY before running"), file=sys.stderr)
         sys.exit(2)

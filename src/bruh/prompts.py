@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 SYSTEM_PROMPT = """\
@@ -41,7 +40,7 @@ def _rule_files(cwd: Path) -> list[Path]:
 
 
 def build_system_prompt(*, include_rules: bool = False) -> str:
-    cwd = Path(os.getcwd())
+    cwd = Path.cwd()
     prompt = SYSTEM_PROMPT + f"\nCurrent working directory: {cwd}\n"
     if not include_rules:
         return prompt

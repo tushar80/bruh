@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -83,10 +82,8 @@ def estimate_tokens(message: Message) -> int:
 
 def estimate_context_tokens(messages: list[Message], system: str = "") -> int:
     """Estimate total tokens across system + all messages."""
-    total = len(system)
-    for msg in messages:
-        total += estimate_tokens(msg)
-    return -(-total // 4)
+    system_tokens = -(-len(system) // 4)
+    return system_tokens + sum(estimate_tokens(msg) for msg in messages)
 
 
 # --------------------------------------------------------------------------- #
@@ -251,6 +248,7 @@ class OpenAICompletionsProvider:
         }
 
         tool_buffers: dict[int, dict[str, str]] = {}
+        tool_started: set[int] = set()
 
         with httpx.stream("POST", url, json=payload, headers=headers, timeout=self.timeout) as resp:
             if resp.status_code != 200:
@@ -293,8 +291,8 @@ class OpenAICompletionsProvider:
                         buf["name"] = fn["name"]
                     if fn.get("arguments"):
                         buf["args"] += fn["arguments"]
-                    if buf["id"] and buf["name"] and "name" not in buf.get("emitted", {}):
-                        buf["emitted"] = {"name": True}  # type: ignore[assignment]
+                    if buf["id"] and buf["name"] and idx not in tool_started:
+                        tool_started.add(idx)
                         yield Event(type="tool_start", tool_id=buf["id"], tool_name=buf["name"])
 
                 finish = choice.get("finish_reason")
@@ -426,9 +424,6 @@ class AnthropicMessagesProvider:
                             tool_id=current_tool_id,
                             tool_name=block.get("name", ""),
                         )
-                    elif btype == "thinking":
-                        yield Event(type="thinking", text="")
-
                 elif etype == "content_block_delta":
                     delta = chunk.get("delta", {})
                     dtype = delta.get("type")
@@ -459,8 +454,6 @@ class AnthropicMessagesProvider:
                     d = chunk.get("delta", {})
                     usage_raw = (chunk.get("usage") or {}).get("output_tokens", 0)
                     stop = d.get("stop_reason", "")
-                    if stop == "tool_use":
-                        stop = "tool_use"
                     yield Event(
                         type="done",
                         stop_reason=stop,
@@ -501,19 +494,3 @@ class AnthropicMessagesProvider:
                     })
             out.append({"role": msg.role, "content": blocks})
         return out
-
-
-# --------------------------------------------------------------------------- #
-# Factory                                                                      #
-# --------------------------------------------------------------------------- #
-
-
-def create_provider(fmt: str = "openai") -> Provider:
-    cfg = get_config()
-    api_key = cfg["api_key"] or ""
-    base_url = cfg["base_url"] or DEFAULT_BASE_URL
-    if not api_key:
-        raise RuntimeError("BRUH_API_KEY environment variable is not set")
-    if fmt == "anthropic":
-        return AnthropicMessagesProvider(api_key, base_url)  # type: ignore[return-value]
-    return OpenAICompletionsProvider(api_key, base_url)  # type: ignore[return-value]
