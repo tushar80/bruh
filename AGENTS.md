@@ -107,8 +107,8 @@ error, then a footer row with `exit N` and elapsed time.
 - Python 3.12+, stdlib + httpx only. No other third-party deps.
 - `from __future__ import annotations` at the top of every module.
 - Type hints required. Dataclasses for value types. `Protocol` for the `Provider` interface.
-- No comments unless explaining a non-obvious decision (the existing comment headers in `providers.py` are section dividers, not explanations).
-- Tool functions in `tools.py` return a string. Errors start with `[error` or `[` prefix and are detected by `is_error=result.startswith("[error")` in the agent loop.
+- No comments unless explaining a non-obvious decision. No section banner comments.
+- Tool functions in `tools.py` return a string. Errors start with `[error` and are detected by `is_error=result.startswith("[error")` in the agent loop. Expected failures (missing file, bad regex) return an error string; anything unexpected raises and `run_tool` turns it into `[error: <tool> failed: ...]`.
 - `TOOL_SPECS` (list of dicts with `name`, `description`, `input_schema`) is the source of truth for what's advertised to the model; `TOOLS` maps name -> function.
 
 ## Known limitations (intentional, not bugs)
@@ -121,7 +121,7 @@ error, then a footer row with `exit N` and elapsed time.
 - No permissions system; tools run with the launching user's privileges.
 - A `KeyboardInterrupt` mid-stream aborts the current turn cleanly (drops
   in-flight tool calls, keeps any streamed text); the session continues.
-  Bash subprocesses started by a tool are *not* cancelled — the turn's tool
+  Bash subprocesses started by a tool are *not* cancelled: the turn's tool
   batch either already ran or didn't. See `Agent._stream_step`.
   Ctrl+C during tool execution substitutes `[error: aborted]` results so
   every tool_use still has a matching tool_result.

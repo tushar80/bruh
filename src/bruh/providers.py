@@ -11,17 +11,11 @@ Both stream SSE responses with httpx. The agent loop calls
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 import httpx
-
-# --------------------------------------------------------------------------- #
-# Message types                                                                #
-# --------------------------------------------------------------------------- #
-
 
 @dataclass
 class TextBlock:
@@ -57,16 +51,7 @@ class Message:
     content: list[ContentBlock]
 
 
-# --------------------------------------------------------------------------- #
-# Token estimation (chars/4 heuristic, conservative overestimate)            #
-# --------------------------------------------------------------------------- #
-
-# Roughly 1 token per 4 chars; overestimates slightly (safer for budget checks).
-ESTIMATED_IMAGE_CHARS = 4800
-
-
 def estimate_tokens(message: Message) -> int:
-    """Estimate token count for a Message using the chars/4 heuristic."""
     chars = 0
     for block in message.content:
         if isinstance(block, TextBlock):
@@ -81,14 +66,8 @@ def estimate_tokens(message: Message) -> int:
 
 
 def estimate_context_tokens(messages: list[Message], system: str = "") -> int:
-    """Estimate total tokens across system + all messages."""
     system_tokens = -(-len(system) // 4)
     return system_tokens + sum(estimate_tokens(msg) for msg in messages)
-
-
-# --------------------------------------------------------------------------- #
-# Tool / usage / events                                                        #
-# --------------------------------------------------------------------------- #
 
 
 @dataclass
@@ -117,10 +96,7 @@ def merge_usage(current: Usage | None, new: Usage | None) -> Usage | None:
     if new is None:
         return current
     if current is None:
-        return Usage(
-            input_tokens=new.input_tokens,
-            output_tokens=new.output_tokens,
-        )
+        return new
     return Usage(
         input_tokens=max(current.input_tokens, new.input_tokens),
         output_tokens=current.output_tokens + new.output_tokens,
@@ -129,7 +105,6 @@ def merge_usage(current: Usage | None, new: Usage | None) -> Usage | None:
 
 @dataclass
 class Event:
-    """A single streamed event from the provider."""
     type: str  # "text" | "thinking" | "tool_start" | "tool_delta" | "tool_end" | "done" | "error"
     text: str = ""
     tool_id: str = ""
@@ -141,14 +116,7 @@ class Event:
     signature: str = ""
 
 
-# --------------------------------------------------------------------------- #
-# Provider protocol                                                            #
-# --------------------------------------------------------------------------- #
-
-
 class Provider(Protocol):
-    name: str
-
     def stream(
         self,
         system: str,
@@ -160,27 +128,7 @@ class Provider(Protocol):
     ) -> Iterator[Event]: ...
 
 
-# --------------------------------------------------------------------------- #
-# Config                                                                       #
-# --------------------------------------------------------------------------- #
-
-# Default base URL. Individual endpoints:
-#   chat completions -> {base}/chat/completions
-#   messages         -> {base}/messages
-# Override with BRUH_BASE_URL.
 DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1"
-
-
-def get_config() -> dict[str, str | None]:
-    return {
-        "api_key": os.environ.get("BRUH_API_KEY"),
-        "base_url": os.environ.get("BRUH_BASE_URL", DEFAULT_BASE_URL),
-    }
-
-
-# --------------------------------------------------------------------------- #
-# Helpers                                                                      #
-# --------------------------------------------------------------------------- #
 
 
 def _parse_sse_lines(line_iter: Iterator[str]) -> Iterator[dict[str, Any]]:
@@ -200,14 +148,7 @@ def _parse_sse_lines(line_iter: Iterator[str]) -> Iterator[dict[str, Any]]:
                 continue
 
 
-# --------------------------------------------------------------------------- #
-# OpenAI completions provider                                                  #
-# --------------------------------------------------------------------------- #
-
-
 class OpenAICompletionsProvider:
-    name = "openai-completions"
-
     def __init__(self, api_key: str, base_url: str = DEFAULT_BASE_URL, timeout: float = 300):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -275,7 +216,6 @@ class OpenAICompletionsProvider:
                 choice = choices[0] if choices else {}
                 delta = choice.get("delta") or {}
 
-                # Reasoning/reasoning_content field (some providers use "reasoning")
                 reasoning = delta.get("reasoning") or delta.get("reasoning_content")
                 if reasoning:
                     yield Event(type="thinking", text=reasoning)
@@ -312,9 +252,7 @@ class OpenAICompletionsProvider:
                         input_tokens=usage_raw.get("prompt_tokens", 0),
                         output_tokens=usage_raw.get("completion_tokens", 0),
                     )
-                    stop = finish
-                    if stop == "tool_calls":
-                        stop = "tool_use"
+                    stop = "tool_use" if finish == "tool_calls" else finish
                     yield Event(type="done", stop_reason=stop, usage=usage)
 
     def _build_messages(self, system: str, messages: list[Message]) -> list[dict[str, Any]]:
@@ -328,8 +266,6 @@ class OpenAICompletionsProvider:
                 for block in msg.content:
                     if isinstance(block, TextBlock):
                         text_parts.append(block.text)
-                    elif isinstance(block, ThinkingBlock):
-                        pass  # OpenAI completions API doesn't round-trip thinking
                     elif isinstance(block, ToolUseBlock):
                         tool_calls.append({
                             "id": block.id,
@@ -345,30 +281,23 @@ class OpenAICompletionsProvider:
                 if tool_calls:
                     entry["tool_calls"] = tool_calls
                 out.append(entry)
-            else:  # user
-                text_parts2: list[str] = []
+            else:
+                user_text: list[str] = []
                 for block in msg.content:
                     if isinstance(block, TextBlock):
-                        text_parts2.append(block.text)
+                        user_text.append(block.text)
                     elif isinstance(block, ToolResultBlock):
                         out.append({
                             "role": "tool",
                             "tool_call_id": block.tool_use_id,
                             "content": block.content,
                         })
-                if text_parts2:
-                    out.append({"role": "user", "content": "\n".join(text_parts2)})
+                if user_text:
+                    out.append({"role": "user", "content": "\n".join(user_text)})
         return out
 
 
-# --------------------------------------------------------------------------- #
-# Anthropic messages provider                                                  #
-# --------------------------------------------------------------------------- #
-
-
 class AnthropicMessagesProvider:
-    name = "anthropic-messages"
-
     def __init__(self, api_key: str, base_url: str = DEFAULT_BASE_URL, timeout: float = 300):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")

@@ -1,7 +1,7 @@
 # bruh
 
 A minimal coding agent in Python. Talks to chat completions and messages
-APIs, driven by a tool-using planning loop. ~1200 lines of Python, depends
+APIs, driven by a tool-using planning loop. ~1600 lines of Python, depends
 only on [httpx](https://www.python-httpx.org/) for streaming HTTP/SSE.
 Licensed under the [MIT License](LICENSE).
 
@@ -58,9 +58,10 @@ Flags:
 --provider {openai,anthropic}     wire format (default: openai)
 --model MODEL                     model id (default: glm-5.2)
 --max-tokens N                    completion cap (default: 8192)
---temperature T                   sampling temp (default: 0.7)
+--temperature T                   sampling temp (default: omitted, model default)
 --max-steps N                     max tool-call rounds per turn (default: 50)
--v, --verbose                     stream thinking + tool calls + token estimate to stderr
+-v, --verbose                     show thinking, token estimate, and full tool output
+--rules                           load ~/AGENTS.md and ./AGENTS.md into the system prompt
 ```
 
 ## Layout
@@ -71,6 +72,7 @@ src/bruh/
   agent.py       Agent loop, argparse CLI
   prompts.py     System prompt assembly (base prompt, cwd, AGENTS.md context)
   providers.py   chat-completions + messages streaming clients, token estimation
+  render.py      Terminal presentation (ANSI theme, tool-call blocks)
   tools.py       Tool implementations and the JSON-schema registry
 pyproject.toml   uv project; depends only on httpx
 ```
@@ -79,7 +81,8 @@ pyproject.toml   uv project; depends only on httpx
 
 - Tools within a turn run in parallel; bash subprocesses are not cancelled
   if you Ctrl+C mid-turn (the turn's batch either already ran or didn't).
-- Streamed thinking is shown in verbose mode but never stored in history.
+- Streamed thinking is shown only in verbose mode. Anthropic thinking blocks
+  stay in history because the messages API rejects a follow-up turn without them.
 - `MAX_TOOL_OUTPUT` (`20_000` chars) caps each tool result before it is
   fed back to the model, to keep history bounded.
 - If the model calls a tool repeatedly without finishing,

@@ -37,84 +37,63 @@ def _truncate_tail(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 
 
 def tool_bash(command: str, workdir: str | None = None, timeout: int = 120) -> str:
-    """Run a shell command and return combined stdout+stderr."""
-    cwd = workdir or os.getcwd()
     try:
         proc = subprocess.run(
             command,
             shell=True,
-            cwd=cwd,
+            cwd=workdir or os.getcwd(),
             capture_output=True,
             text=True,
             timeout=timeout,
         )
-        out = (proc.stdout or "") + (proc.stderr or "")
-        if proc.returncode != 0:
-            return _truncate_tail(f"[error: exit code {proc.returncode}]\n{out}")
-        return _truncate_tail(out) if out else "[no output]"
     except subprocess.TimeoutExpired:
         return f"[error: command timed out after {timeout}s]"
-    except Exception as exc:  # noqa: BLE001
-        return f"[error running command: {exc}]"
+    out = proc.stdout + proc.stderr
+    if proc.returncode != 0:
+        return _truncate_tail(f"[error: exit code {proc.returncode}]\n{out}")
+    return _truncate_tail(out) if out else "[no output]"
 
 
 def tool_read(file_path: str, offset: int = 1, limit: int = MAX_READ_LINES) -> str:
-    """Read a slice of a file, 1-indexed line numbers, with line-number prefixes."""
-    try:
-        p = Path(file_path)
-        if not p.exists() or not p.is_file():
-            return f"[error: file not found: {file_path}]"
-        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-        start = max(1, offset)
-        end = min(len(lines), start + limit - 1)
-        buf: list[str] = []
-        for i in range(start, end + 1):
-            line = lines[i - 1]
-            if len(line) > 2000:
-                line = line[:2000] + "...[truncated]"
-            buf.append(f"{i}: {line}")
-        if not buf:
-            return "[file is empty]"
-        text = "\n".join(buf)
-        if len(text) > MAX_OUTPUT_CHARS:
-            text = text[:MAX_OUTPUT_CHARS] + "\n...[truncated; use offset to continue]"
-        return text
-    except Exception as exc:  # noqa: BLE001
-        return f"[error reading file: {exc}]"
+    p = Path(file_path)
+    if not p.is_file():
+        return f"[error: file not found: {file_path}]"
+    lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+    start = max(1, offset)
+    end = min(len(lines), start + limit - 1)
+    buf: list[str] = []
+    for i in range(start, end + 1):
+        line = lines[i - 1]
+        if len(line) > 2000:
+            line = line[:2000] + "...[truncated]"
+        buf.append(f"{i}: {line}")
+    if not buf:
+        return "[file is empty]"
+    text = "\n".join(buf)
+    if len(text) > MAX_OUTPUT_CHARS:
+        text = text[:MAX_OUTPUT_CHARS] + "\n...[truncated; use offset to continue]"
+    return text
 
 
 def tool_write(file_path: str, content: str) -> str:
-    """Write content to a file (creates or overwrites)."""
-    try:
-        p = Path(file_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content, encoding="utf-8")
-        return f"[wrote {len(content)} bytes to {file_path}]"
-    except Exception as exc:  # noqa: BLE001
-        return f"[error writing file: {exc}]"
+    p = Path(file_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content, encoding="utf-8")
+    return f"[wrote {len(content)} bytes to {file_path}]"
 
 
 def tool_edit(file_path: str, old_string: str, new_string: str, replace_all: bool = False) -> str:
-    """Replace an exact string match in a file. Fails if old_string not found
-    or (when replace_all=False) if it matches more than once."""
-    try:
-        p = Path(file_path)
-        if not p.exists() or not p.is_file():
-            return f"[error: file not found: {file_path}]"
-        text = p.read_text(encoding="utf-8", errors="replace")
-        count = text.count(old_string)
-        if count == 0:
-            return "[error: old_string not found in file]"
-        if not replace_all and count > 1:
-            return f"[error: old_string found {count} times; pass replace_all=true or add more context]"
-        if replace_all:
-            new_text = text.replace(old_string, new_string)
-        else:
-            new_text = text.replace(old_string, new_string, 1)
-        p.write_text(new_text, encoding="utf-8")
-        return f"[edited {file_path}: {count} replacement(s)]"
-    except Exception as exc:  # noqa: BLE001
-        return f"[error editing file: {exc}]"
+    p = Path(file_path)
+    if not p.is_file():
+        return f"[error: file not found: {file_path}]"
+    text = p.read_text(encoding="utf-8", errors="replace")
+    count = text.count(old_string)
+    if count == 0:
+        return "[error: old_string not found in file]"
+    if not replace_all and count > 1:
+        return f"[error: old_string found {count} times; pass replace_all=true or add more context]"
+    p.write_text(text.replace(old_string, new_string, -1 if replace_all else 1), encoding="utf-8")
+    return f"[edited {file_path}: {count} replacement(s)]"
 
 
 def tool_grep(
@@ -125,65 +104,52 @@ def tool_grep(
     literal: bool = False,
     limit: int = MAX_RESULTS,
 ) -> str:
-    """Search file contents with a regex. Returns matches as path:line:content."""
     try:
         regex = re.compile(
             re.escape(pattern) if literal else pattern,
             re.IGNORECASE if ignore_case else 0,
         )
-        root = Path(path)
-        files: list[Path] = []
-        if root.is_file():
-            files = [root]
-        else:
-            for dirpath, dirnames, filenames in os.walk(root):
-                dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-                files.extend(Path(dirpath) / name for name in filenames)
-        buf: list[str] = []
-        matches = 0
-        for fp in files:
-            if include and not fnmatch.fnmatch(fp.name, include):
-                continue
-            try:
-                for lineno, line in enumerate(
-                    fp.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
-                ):
-                    if regex.search(line):
-                        buf.append(f"{fp}:{lineno}: {line[:2000]}")
-                        matches += 1
-                        if matches >= limit:
-                            buf.append(f"...[max {limit} results reached]")
-                            return "\n".join(buf)
-            except Exception:
-                continue
-        if not buf:
-            return "[no matches]"
-        return "\n".join(buf)
     except re.error as exc:
         return f"[error: invalid regex: {exc}]"
-    except Exception as exc:  # noqa: BLE001
-        return f"[error grepping: {exc}]"
+    root = Path(path)
+    files: list[Path] = []
+    if root.is_file():
+        files = [root]
+    else:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+            files.extend(Path(dirpath) / name for name in filenames)
+    buf: list[str] = []
+    for fp in files:
+        if include and not fnmatch.fnmatch(fp.name, include):
+            continue
+        try:
+            text = fp.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if regex.search(line):
+                buf.append(f"{fp}:{lineno}: {line[:2000]}")
+                if len(buf) >= limit:
+                    buf.append(f"...[max {limit} results reached]")
+                    return "\n".join(buf)
+    if not buf:
+        return "[no matches]"
+    return "\n".join(buf)
 
 
 def tool_glob(pattern: str, path: str = ".") -> str:
-    """Match file paths by glob pattern."""
-    try:
-        root = Path(path)
-        results = sorted(p for p in root.glob(pattern) if not SKIP_DIRS & set(p.parts))
-        # Also support recursive ** when not present
-        if not results and "**" not in pattern:
-            results = sorted(p for p in root.rglob(pattern) if not SKIP_DIRS & set(p.parts))
-        if not results:
-            return "[no matches]"
-        out = [str(p) for p in results[:MAX_RESULTS]]
-        if len(results) > MAX_RESULTS:
-            out.append(f"...[{len(results)} matches, showing first {MAX_RESULTS}]")
-        return "\n".join(out)
-    except Exception as exc:  # noqa: BLE001
-        return f"[error globbing: {exc}]"
+    root = Path(path)
+    results = sorted(p for p in root.glob(pattern) if not SKIP_DIRS & set(p.parts))
+    if not results and "**" not in pattern:
+        results = sorted(p for p in root.rglob(pattern) if not SKIP_DIRS & set(p.parts))
+    if not results:
+        return "[no matches]"
+    out = [str(p) for p in results[:MAX_RESULTS]]
+    if len(results) > MAX_RESULTS:
+        out.append(f"...[{len(results)} matches, showing first {MAX_RESULTS}]")
+    return "\n".join(out)
 
-
-# --- Registry ---------------------------------------------------------------
 
 TOOL_SPECS: list[dict[str, Any]] = [
     {
@@ -286,5 +252,5 @@ def run_tool(name: str, arguments: dict[str, Any]) -> str:
         return fn(**arguments)
     except TypeError as exc:
         return f"[error: bad arguments for {name}: {exc}]"
-    except Exception as exc:  # noqa: BLE001
-        return f"[error: tool {name} crashed: {exc}]"
+    except Exception as exc:
+        return f"[error: {name} failed: {exc}]"

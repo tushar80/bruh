@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections.abc import Iterator
@@ -26,6 +27,7 @@ from .providers import (
     Event,
     Message,
     OpenAICompletionsProvider,
+    Provider,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
@@ -34,7 +36,6 @@ from .providers import (
     Usage,
     estimate_context_tokens,
     estimate_tokens,
-    get_config,
     merge_usage,
 )
 from .tools import TOOL_SPECS, run_tool
@@ -44,21 +45,11 @@ MAX_STEPS = 50
 MAX_TOOL_OUTPUT = 20_000
 TOOL_WORKERS = 8
 
-def _build_tool_specs() -> list[ToolSpec]:
-    return [
-        ToolSpec(
-            name=spec["name"],
-            description=spec["description"],
-            input_schema=spec["input_schema"],
-        )
-        for spec in TOOL_SPECS
-    ]
-
 
 class Agent:
     def __init__(
         self,
-        provider: OpenAICompletionsProvider | AnthropicMessagesProvider,
+        provider: Provider,
         model: str = DEFAULT_MODEL,
         max_tokens: int = 8192,
         temperature: float | None = None,
@@ -71,22 +62,16 @@ class Agent:
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.max_steps = max_steps
-        self.verbose = verbose
         self.out = render.Renderer(verbose=verbose)
         self.messages: list[Message] = []
         self.system_prompt = build_system_prompt(include_rules=include_rules)
-        self.tools = _build_tool_specs()
+        self.tools = [ToolSpec(**spec) for spec in TOOL_SPECS]
         self.last_usage: Usage | None = None
         self.last_usage_index: int = -1
 
-    # --- public ------------------------------------------------------------- #
-
     def run(self, user_text: str) -> str:
-        """Send one user turn; drive the tool loop to completion."""
         self.messages.append(Message(role="user", content=[TextBlock(text=user_text)]))
         return self._drive_loop()
-
-    # --- loop --------------------------------------------------------------- #
 
     def _context_tokens(self) -> int:
         """Context estimate anchored to the last real provider usage when
@@ -99,11 +84,8 @@ class Agent:
         return self.last_usage.total_tokens + trailing
 
     def _execute_tool_turn(self, new_blocks: list[ContentBlock]) -> list[ContentBlock]:
-        """Run every ToolUseBlock in ``new_blocks`` concurrently and return
-        ToolResultBlock list in the same order as the tool_use blocks appeared
-        on the wire. Bash/reads are I/O-bound, so threads suffice; order is
-        preserved because the Anthropic messages API requires tool_result ids
-        to line up with the prior tool_use ids."""
+        """Results come back in wire order: the messages API requires
+        tool_result ids to line up with the prior tool_use ids."""
         calls: list[ToolUseBlock] = [
             b for b in new_blocks if isinstance(b, ToolUseBlock)
         ]
@@ -142,16 +124,14 @@ class Agent:
             self.out.warn("aborted")
             ordered = ["[error: aborted]"] * len(calls)
 
-        results: list[ContentBlock] = []
-        for call, text in zip(calls, ordered):
-            results.append(
-                ToolResultBlock(
-                    tool_use_id=call.id,
-                    content=text[:MAX_TOOL_OUTPUT],
-                    is_error=text.startswith("[error"),
-                )
+        return [
+            ToolResultBlock(
+                tool_use_id=call.id,
+                content=text[:MAX_TOOL_OUTPUT],
+                is_error=text.startswith("[error"),
             )
-        return results
+            for call, text in zip(calls, ordered)
+        ]
 
     def _drive_loop(self) -> str:
         final_text_parts: list[str] = []
@@ -167,7 +147,6 @@ class Agent:
                 self.last_usage_index = len(self.messages) - 1
 
             if not did_tools:
-                # assistant finished with a plain message (or turn was aborted)
                 self.out.debug(f"step {step} done ({stop})")
                 break
 
@@ -176,7 +155,6 @@ class Agent:
                 self.last_usage.total_tokens if self.last_usage is not None else None,
             )
 
-            # Execute every tool call from this turn (in parallel)
             tool_results = self._execute_tool_turn(new_blocks)
             if tool_results:
                 self.messages.append(Message(role="user", content=tool_results))
@@ -195,7 +173,6 @@ class Agent:
         tool_calls: dict[str, dict[str, Any]] = {}
         stop_reason = ""
         had_error = False
-        seen_text_parts: list[str] = []
         turn_usage: Usage | None = None
 
         stream: Iterator[Event] = self.provider.stream(
@@ -217,7 +194,6 @@ class Agent:
                     if ev.text:
                         self.out.text(ev.text)
                         text_buf += ev.text
-                        seen_text_parts.append(ev.text)
                 elif ev.type == "tool_start":
                     tool_calls[ev.tool_id] = {"name": ev.tool_name, "args": ""}
                 elif ev.type == "tool_delta":
@@ -251,9 +227,8 @@ class Agent:
         if had_error and not tool_calls and not text_buf:
             return [], stop_reason, "", False, turn_usage
 
-        # Build assistant content blocks for history. Thinking goes first:
-        # the messages API requires it back (with its signature) on any turn
-        # that follows a thinking-enabled response.
+        # Thinking goes first: the messages API requires it back (with its
+        # signature) on any turn that follows a thinking-enabled response.
         new_blocks: list[ContentBlock] = []
         if thinking_buf:
             new_blocks.append(ThinkingBlock(thinking=thinking_buf, signature=thinking_sig))
@@ -272,15 +247,9 @@ class Agent:
         return new_blocks, stop_reason, text_buf, len(tool_calls) > 0, turn_usage
 
 
-# --------------------------------------------------------------------------- #
-# Interactive session                                                          #
-# --------------------------------------------------------------------------- #
-
-
-def _make_provider(fmt: str) -> OpenAICompletionsProvider | AnthropicMessagesProvider:
-    cfg = get_config()
-    api_key = cfg["api_key"] or ""
-    base_url = cfg["base_url"] or DEFAULT_BASE_URL
+def _make_provider(fmt: str) -> Provider:
+    api_key = os.environ.get("BRUH_API_KEY", "")
+    base_url = os.environ.get("BRUH_BASE_URL") or DEFAULT_BASE_URL
     if not api_key:
         print(render.fg("error", "error: set BRUH_API_KEY before running"), file=sys.stderr)
         sys.exit(2)
@@ -308,7 +277,8 @@ def main() -> None:
                    help="Sampling temperature; omitted from the request unless set "
                         "(some models, e.g. kimi-k3, only accept their own default)")
     p.add_argument("--max-steps", type=int, default=MAX_STEPS, help="Max tool-call steps per turn")
-    p.add_argument("-v", "--verbose", action="store_true", help="Print tool calls + thinking to stderr")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="Show thinking, token estimate, and full tool output")
     p.add_argument("--rules", dest="include_rules", action="store_true",
                    help="Load AGENTS.md rule files (~/AGENTS.md and ./AGENTS.md)")
     args = p.parse_args()
