@@ -48,10 +48,10 @@ def tool_bash(command: str, workdir: str | None = None, timeout: int = 120) -> s
         )
     except subprocess.TimeoutExpired:
         return f"[error: command timed out after {timeout}s]"
-    out = proc.stdout + proc.stderr
+    out = _truncate_tail(proc.stdout + proc.stderr)
     if proc.returncode != 0:
-        return _truncate_tail(f"[error: exit code {proc.returncode}]\n{out}")
-    return _truncate_tail(out) if out else "[no output]"
+        return f"[error: exit code {proc.returncode}]\n{out}"
+    return out or "[no output]"
 
 
 def tool_read(file_path: str, offset: int = 1, limit: int = MAX_READ_LINES) -> str:
@@ -120,6 +120,7 @@ def tool_grep(
             dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
             files.extend(Path(dirpath) / name for name in filenames)
     buf: list[str] = []
+    size = 0
     for fp in files:
         if include and not fnmatch.fnmatch(fp.name, include):
             continue
@@ -130,6 +131,10 @@ def tool_grep(
         for lineno, line in enumerate(text.splitlines(), 1):
             if regex.search(line):
                 buf.append(f"{fp}:{lineno}: {line[:2000]}")
+                size += len(buf[-1]) + 1
+                if size > MAX_OUTPUT_CHARS:
+                    buf.append(f"...[truncated at {MAX_OUTPUT_CHARS} chars; narrow the pattern or path]")
+                    return "\n".join(buf)
                 if len(buf) >= limit:
                     buf.append(f"...[max {limit} results reached]")
                     return "\n".join(buf)

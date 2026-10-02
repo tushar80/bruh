@@ -83,8 +83,8 @@ pyproject.toml   uv project; depends only on httpx
   if you Ctrl+C mid-turn (the turn's batch either already ran or didn't).
 - Streamed thinking is shown only in verbose mode. Anthropic thinking blocks
   stay in history because the messages API rejects a follow-up turn without them.
-- `MAX_TOOL_OUTPUT` (`20_000` chars) caps each tool result before it is
-  fed back to the model, to keep history bounded.
+- Each tool caps its own output at 20,000 chars and says so when it truncates.
+  bash keeps the tail and saves the full output to a temp file.
 - If the model calls a tool repeatedly without finishing,
   `--max-steps` stops the loop (default 50).
 - No context compaction: message history grows unbounded. Watch the

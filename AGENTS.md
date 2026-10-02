@@ -117,7 +117,7 @@ error, then a footer row with `exit N` and elapsed time.
 - Thinking display is verbose-only. The Anthropic provider requests thinking
   (`budget_tokens: 1024`) and the blocks stay in history: the messages API
   rejects a follow-up turn that drops a thinking block or its signature.
-- `MAX_TOOL_OUTPUT` (20_000 chars) caps each tool result before feeding back to the model.
+- Each tool caps its own result at `MAX_OUTPUT_CHARS` (20_000) in `tools.py` and appends a truncation marker the model can act on. The agent loop does not truncate again, or those markers get cut off.
 - No permissions system; tools run with the launching user's privileges.
 - A `KeyboardInterrupt` mid-stream aborts the current turn cleanly (drops
   in-flight tool calls, keeps any streamed text); the session continues.

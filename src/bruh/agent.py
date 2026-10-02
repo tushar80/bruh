@@ -42,7 +42,6 @@ from .tools import TOOL_SPECS, run_tool
 
 DEFAULT_MODEL = "glm-5.2"
 MAX_STEPS = 50
-MAX_TOOL_OUTPUT = 20_000
 TOOL_WORKERS = 8
 
 
@@ -127,7 +126,7 @@ class Agent:
         return [
             ToolResultBlock(
                 tool_use_id=call.id,
-                content=text[:MAX_TOOL_OUTPUT],
+                content=text,
                 is_error=text.startswith("[error"),
             )
             for call, text in zip(calls, ordered)
