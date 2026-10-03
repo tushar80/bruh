@@ -42,6 +42,7 @@ def tool_bash(command: str, workdir: str | None = None, timeout: int = 120) -> s
             command,
             shell=True,
             cwd=workdir or os.getcwd(),
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=timeout,

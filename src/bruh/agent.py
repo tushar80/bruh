@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import readline  # imported for its side effect: line editing and history in input()
 import sys
 import time
 from collections.abc import Iterator
