@@ -87,7 +87,10 @@ def tool_edit(file_path: str, old_string: str, new_string: str, replace_all: boo
     p = Path(file_path)
     if not p.is_file():
         return f"[error: file not found: {file_path}]"
-    text = p.read_text(encoding="utf-8", errors="replace")
+    try:
+        text = p.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return f"[error: {file_path} is not valid UTF-8; edit would corrupt it]"
     count = text.count(old_string)
     if count == 0:
         return "[error: old_string not found in file]"
