@@ -11,7 +11,9 @@ Both stream SSE responses with httpx. The agent loop calls
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -129,6 +131,20 @@ class Provider(Protocol):
 
 
 DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1"
+RETRY_STATUS = {429, 500, 502, 503, 504, 529}
+RETRY_DELAYS = (1, 2, 4)
+
+
+@contextmanager
+def _post(url: str, payload: dict[str, Any], headers: dict[str, str], timeout: float) -> Iterator[httpx.Response]:
+    """Retries happen only on the status line, before anything is streamed, so
+    the agent never sees a partial response twice."""
+    for delay in (*RETRY_DELAYS, None):
+        with httpx.stream("POST", url, json=payload, headers=headers, timeout=timeout) as resp:
+            if delay is None or resp.status_code not in RETRY_STATUS:
+                yield resp
+                return
+        time.sleep(delay)
 
 
 def _parse_sse_lines(line_iter: Iterator[str]) -> Iterator[dict[str, Any]]:
@@ -193,7 +209,7 @@ class OpenAICompletionsProvider:
         tool_buffers: dict[int, dict[str, str]] = {}
         tool_started: set[int] = set()
 
-        with httpx.stream("POST", url, json=payload, headers=headers, timeout=self.timeout) as resp:
+        with _post(url, payload, headers, self.timeout) as resp:
             if resp.status_code != 200:
                 body = resp.read().decode("utf-8", errors="replace")
                 yield Event(type="error", error=f"HTTP {resp.status_code}: {body[:500]}")
@@ -336,7 +352,7 @@ class AnthropicMessagesProvider:
             "Content-Type": "application/json",
         }
 
-        with httpx.stream("POST", url, json=payload, headers=headers, timeout=self.timeout) as resp:
+        with _post(url, payload, headers, self.timeout) as resp:
             if resp.status_code != 200:
                 body = resp.read().decode("utf-8", errors="replace")
                 yield Event(type="error", error=f"HTTP {resp.status_code}: {body[:500]}")
