@@ -404,8 +404,10 @@ class Renderer:
 
     def prompt(self) -> str:
         if not COLOR or not sys.stdout.isatty():
-            return "you> "
-        return bold(fg("accent", "you>")) + " "
+            return "> "
+        # input() goes through readline (libedit in uv's Python), which drops a
+        # bare ESC from the prompt. \x01..\x02 marks a span as non-printing.
+        return re.sub(r"\x1b\[[0-9;]*m", "\x01\\g<0>\x02", bold(fg("accent", "\u276f"))) + " "
 
     def error(self, message: str) -> None:
         self._line("error", f"[error] {message}")
