@@ -50,7 +50,7 @@ uv run bruh -p "Say exactly: ok"
 src/bruh/
   __init__.py
   agent.py       Agent loop, argparse CLI
-  prompts.py     System prompt assembly (base prompt, cwd, AGENTS.md context)
+  prompts.py     System prompt assembly (base prompt, cwd, skills index, AGENTS.md context)
   providers.py   chat-completions + messages streaming clients, token estimation
   render.py      Terminal presentation (ANSI theme, tool-call blocks)
   tools.py       Tool implementations + JSON-schema registry (TOOL_SPECS)

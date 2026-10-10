@@ -56,6 +56,7 @@ class Agent:
         max_steps: int = MAX_STEPS,
         verbose: bool = False,
         include_rules: bool = False,
+        include_skills: bool = True,
     ):
         self.provider = provider
         self.model = model
@@ -64,7 +65,7 @@ class Agent:
         self.max_steps = max_steps
         self.out = render.Renderer(verbose=verbose)
         self.messages: list[Message] = []
-        self.system_prompt = build_system_prompt(include_rules=include_rules)
+        self.system_prompt = build_system_prompt(include_rules=include_rules, include_skills=include_skills)
         self.tools = [ToolSpec(**spec) for spec in TOOL_SPECS]
         self.last_usage: Usage | None = None
         self.last_usage_index: int = -1
@@ -281,6 +282,8 @@ def main() -> None:
                    help="Show thinking, token estimate, and full tool output")
     p.add_argument("--rules", dest="include_rules", action="store_true",
                    help="Load AGENTS.md rule files (~/AGENTS.md and ./AGENTS.md)")
+    p.add_argument("--no-skills", dest="include_skills", action="store_false",
+                   help="Don't advertise skills from ~/.agents/skills and ./.agents/skills")
     args = p.parse_args()
 
     provider = _make_provider(args.provider)
@@ -292,6 +295,7 @@ def main() -> None:
         max_steps=args.max_steps,
         verbose=args.verbose,
         include_rules=args.include_rules,
+        include_skills=args.include_skills,
     )
 
     if args.prompt:
