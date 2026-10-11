@@ -9,8 +9,11 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
+import signal
 import subprocess
 import tempfile
+import threading
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from collections.abc import Callable
@@ -22,6 +25,9 @@ SKIP_DIRS = {".git", ".venv", "__pycache__", "node_modules"}
 _SKIP_TEXT = ", ".join(sorted(SKIP_DIRS))
 
 ToolFn = Callable[..., str]
+
+_running: set[subprocess.Popen[str]] = set()
+_running_lock = threading.Lock()
 
 
 def _truncate_tail(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
@@ -36,20 +42,49 @@ def _truncate_tail(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
     return f"[...truncated {len(text) - limit} chars; full output saved to {path}]\n{kept}"
 
 
+def _kill_group(proc: subprocess.Popen[str]) -> None:
+    # The group can already be gone if every process in it exited on its own.
+    with suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGKILL)
+
+
+def kill_running() -> None:
+    """Kill every bash command still running. Worker threads never see
+    KeyboardInterrupt, so the agent calls this on abort."""
+    with _running_lock:
+        procs = list(_running)
+    for proc in procs:
+        _kill_group(proc)
+
+
 def tool_bash(command: str, workdir: str | None = None, timeout: int = 120) -> str:
+    # Own session so the whole tree (not just the shell) can be killed, and so
+    # it does not get the terminal's SIGINT before kill_running() runs.
+    proc = subprocess.Popen(
+        command,
+        shell=True,
+        cwd=workdir or os.getcwd(),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    with _running_lock:
+        _running.add(proc)
     try:
-        proc = subprocess.run(
-            command,
-            shell=True,
-            cwd=workdir or os.getcwd(),
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        _kill_group(proc)
+        proc.communicate()
         return f"[error: command timed out after {timeout}s]"
-    out = _truncate_tail(proc.stdout + proc.stderr)
+    except KeyboardInterrupt:
+        _kill_group(proc)
+        raise
+    finally:
+        with _running_lock:
+            _running.discard(proc)
+    out = _truncate_tail(stdout + stderr)
     if proc.returncode != 0:
         return f"[error: exit code {proc.returncode}]\n{out}"
     return out or "[no output]"

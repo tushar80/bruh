@@ -39,7 +39,7 @@ from .providers import (
     estimate_tokens,
     merge_usage,
 )
-from .tools import TOOL_SPECS, run_tool
+from .tools import TOOL_SPECS, kill_running, run_tool
 
 DEFAULT_MODEL = "deepseek-v4.1-flash"
 MAX_STEPS = 50
@@ -113,17 +113,21 @@ class Agent:
             )
             return result
 
+        pool = ThreadPoolExecutor(max_workers=TOOL_WORKERS)
         try:
             if single:
                 ordered: list[str] = [_run_one(calls[0])]
             else:
-                with ThreadPoolExecutor(max_workers=TOOL_WORKERS) as pool:
-                    ordered = list(pool.map(_run_one, calls))
+                ordered = list(pool.map(_run_one, calls))
         except KeyboardInterrupt:
+            kill_running()
+            pool.shutdown(cancel_futures=True)
             # Substitute error results so every tool_use still gets a
             # tool_result; the messages API rejects dangling tool calls.
             self.out.warn("aborted")
             ordered = ["[error: aborted]"] * len(calls)
+        finally:
+            pool.shutdown()
 
         return [
             ToolResultBlock(

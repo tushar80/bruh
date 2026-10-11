@@ -121,10 +121,11 @@ error, then a footer row with `exit N` and elapsed time.
 - No permissions system; tools run with the launching user's privileges.
 - A `KeyboardInterrupt` mid-stream aborts the current turn cleanly (drops
   in-flight tool calls, keeps any streamed text); the session continues.
-  Bash subprocesses started by a tool are *not* cancelled: the turn's tool
-  batch either already ran or didn't. See `Agent._stream_step`.
-  Ctrl+C during tool execution substitutes `[error: aborted]` results so
-  every tool_use still has a matching tool_result.
+  See `Agent._stream_step`.
+  Ctrl+C during tool execution kills every running bash command's process
+  group (`tools.kill_running`) and substitutes `[error: aborted]` results so
+  every tool_use still has a matching tool_result. Non-bash tools already
+  running finish before the turn returns.
 
 ## Things NOT to do
 
