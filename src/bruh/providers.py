@@ -338,9 +338,14 @@ class AnthropicMessagesProvider:
         temperature: float | None = None,
     ) -> Iterator[Event]:
         url = f"{self.base_url}/messages"
+        wire = self._build_messages(messages)
+        # Two breakpoints, as pi does: the system block caches tools + system,
+        # the last user block caches the conversation so far.
+        if wire and wire[-1]["role"] == "user" and wire[-1]["content"]:
+            wire[-1]["content"][-1]["cache_control"] = {"type": "ephemeral"}
         payload: dict[str, Any] = {
             "model": model,
-            "messages": self._build_messages(messages),
+            "messages": wire,
             "max_tokens": max_tokens,
             "stream": True,
             # Without this, models that support extended thinking emit none.
@@ -349,7 +354,7 @@ class AnthropicMessagesProvider:
         if temperature is not None:
             payload["temperature"] = temperature
         if system:
-            payload["system"] = system
+            payload["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         if tools:
             payload["tools"] = [
                 {"name": t.name, "description": t.description, "input_schema": t.input_schema}
@@ -434,7 +439,13 @@ class AnthropicMessagesProvider:
 
                 elif etype == "message_start":
                     msg = chunk.get("message", {})
-                    uin = (msg.get("usage") or {}).get("input_tokens", 0)
+                    u = msg.get("usage") or {}
+                    # With caching on, input_tokens counts only the uncached tail.
+                    uin = (
+                        u.get("input_tokens", 0)
+                        + (u.get("cache_read_input_tokens") or 0)
+                        + (u.get("cache_creation_input_tokens") or 0)
+                    )
                     if uin:
                         yield Event(type="done", usage=Usage(input_tokens=uin))
 
