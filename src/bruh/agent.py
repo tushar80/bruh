@@ -41,7 +41,7 @@ from .providers import (
 )
 from .tools import TOOL_SPECS, run_tool
 
-DEFAULT_MODEL = "glm-5.2"
+DEFAULT_MODEL = "deepseek-v4.1-flash"
 MAX_STEPS = 50
 TOOL_WORKERS = 8
 
@@ -302,7 +302,7 @@ def main() -> None:
         agent.run(args.prompt)
         return
 
-    agent.out.banner("bruh ready. ^D to exit.")
+    agent.out.banner(f"bruh ready ({agent.model}). ^D to exit.")
     while True:
         try:
             line = input(agent.out.prompt())

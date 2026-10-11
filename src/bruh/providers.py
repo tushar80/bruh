@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from importlib.metadata import version
 from typing import Any, Protocol
 
 import httpx
@@ -131,6 +133,9 @@ class Provider(Protocol):
 
 
 DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1"
+# OpenCode Go rejects requests without a stable per-conversation session id and
+# asks clients to identify themselves: https://opencode.ai/docs/go/
+USER_AGENT = f"bruh/{version('bruh')}"
 RETRY_STATUS = {429, 500, 502, 503, 504, 529}
 RETRY_DELAYS = (1, 2, 4)
 
@@ -169,6 +174,7 @@ class OpenAICompletionsProvider:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.session_id = uuid.uuid4().hex
 
     def stream(
         self,
@@ -204,6 +210,8 @@ class OpenAICompletionsProvider:
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+            "x-opencode-session": self.session_id,
         }
 
         tool_buffers: dict[int, dict[str, str]] = {}
@@ -318,6 +326,7 @@ class AnthropicMessagesProvider:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.session_id = uuid.uuid4().hex
 
     def stream(
         self,
@@ -350,6 +359,8 @@ class AnthropicMessagesProvider:
             "x-api-key": self.api_key,
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+            "x-opencode-session": self.session_id,
         }
 
         with _post(url, payload, headers, self.timeout) as resp:
