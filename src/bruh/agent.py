@@ -272,9 +272,8 @@ def main() -> None:
     p.add_argument("--provider", choices=["openai", "anthropic"], default="openai",
                    help="API format: chat completions or messages")
     p.add_argument("--model", default=DEFAULT_MODEL,
-                   help=f"Model id (default: {DEFAULT_MODEL}). Models served over /messages, "
-                        "e.g. minimax-m3, need --provider anthropic. "
-                        "Full list: https://opencode.ai/docs/go/")
+                   help=f"Model id (default: {DEFAULT_MODEL}). Full list: https://opencode.ai/docs/go/ "
+                        "(models served over /messages need --provider anthropic)")
     p.add_argument("--max-tokens", type=int, default=8192)
     p.add_argument("--temperature", type=float, default=None,
                    help="Sampling temperature; omitted from the request unless set "
