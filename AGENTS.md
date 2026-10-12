@@ -99,7 +99,9 @@ error, then a footer row with `exit N` and elapsed time.
   `COLORTERM=truecolor`, otherwise a 256-color palette is used.
 - After Enter, `Renderer.user_message` moves the cursor up over the echoed input and redraws it as a
   `user_bg` block. The row count assumes `PROMPT_WIDTH` and one column per character,
-  so wide characters can leave a stray row.
+  so wide characters can leave a stray row. Lines still waiting on stdin after Enter are treated as the
+  rest of a paste; the whole paste opens in `$VISUAL`/`$EDITOR` before sending, as does `/edit`
+  (`agent._read_message`). readline cannot edit across lines, so the editor is the multi-line editor.
 - Reasoning streams to stderr with no trailing newline, so `Renderer._close_thinking` has to run before
   anything else prints or the answer starts mid-line.
 - stdout carries only model text. Everything else goes to stderr, and `_out`/`_err` flush the other stream

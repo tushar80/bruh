@@ -13,7 +13,11 @@ import argparse
 import json
 import os
 import readline  # imported for its side effect: line editing and history in input()
+import select
+import shlex
+import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -44,6 +48,7 @@ from .tools import TOOL_SPECS, kill_running, run_tool
 DEFAULT_MODEL = "deepseek-v4.1-flash"
 MAX_STEPS = 50
 TOOL_WORKERS = 8
+PASTE_WAIT = 0.05
 
 
 class Agent:
@@ -263,6 +268,38 @@ def _make_provider(fmt: str) -> Provider:
     return OpenAICompletionsProvider(api_key, base_url)
 
 
+def _edit(out: render.Renderer, draft: str) -> str:
+    """Open $VISUAL/$EDITOR on draft. A nonzero exit (vim's :cq) cancels."""
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+    with tempfile.NamedTemporaryFile("w+", suffix=".md", prefix="bruh-", encoding="utf-8") as f:
+        f.write(draft)
+        f.flush()
+        # shell=True because EDITOR may carry arguments, e.g. "code --wait".
+        code = subprocess.run(f"{editor} {shlex.quote(f.name)}", shell=True).returncode
+        if code != 0:
+            out.warn(f"{editor} exited {code}, message not sent")
+            return ""
+        # By path, not f.read(): editors that save via rename leave f on the old file.
+        with open(f.name, encoding="utf-8") as saved:
+            return saved.read().strip()
+
+
+def _read_message(out: render.Renderer) -> tuple[list[str], str]:
+    """Returns the lines as typed (for the renderer to erase) and the message.
+    Pasted text arrives as one burst, so input still waiting after Enter is the
+    rest of a paste; it opens in the editor rather than sending unseen."""
+    typed = [input(out.prompt())]
+    if not sys.stdin.isatty():
+        return typed, typed[0]
+    while select.select([sys.stdin], [], [], PASTE_WAIT)[0]:
+        typed.append(input(out.continuation()))
+    if typed == ["/edit"]:
+        return typed, _edit(out, "")
+    if len(typed) > 1:
+        return typed, _edit(out, "\n".join(typed))
+    return typed, typed[0]
+
+
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="bruh",
@@ -303,18 +340,18 @@ def main() -> None:
         agent.run(args.prompt)
         return
 
-    agent.out.banner(f"bruh ready ({agent.model}). ^D to exit.")
+    agent.out.banner(f"bruh ready ({agent.model}). /edit for multi-line, ^D to exit.")
     while True:
         try:
-            line = input(agent.out.prompt())
+            typed, text = _read_message(agent.out)
         except (EOFError, KeyboardInterrupt):
             agent.out.turn_break()
             agent.out.banner("bye.")
             return
-        if not line.strip():
+        if not text.strip():
             continue
-        agent.out.user_message([line], line)
-        agent.run(line)
+        agent.out.user_message(typed, text)
+        agent.run(text)
         agent.out.turn_break()
 
 

@@ -114,7 +114,7 @@ HEAD_ONLY = ("write", "edit")  # result collapses to a one-line summary
 TAIL_PREVIEW = ("bash",)  # keep the end of the output, where failures are
 PREVIEW_LINES = {"bash": 5}
 DEFAULT_PREVIEW = 10
-PROMPT_WIDTH = 2  # visible width of prompt()
+PROMPT_WIDTH = 2  # visible width of prompt() and continuation()
 
 
 def _width() -> int:
@@ -413,10 +413,13 @@ class Renderer:
         # bare ESC from the prompt. \x01..\x02 marks a span as non-printing.
         return re.sub(r"\x1b\[[0-9;]*m", "\x01\\g<0>\x02", bold(fg("accent", "\u276f"))) + " "
 
+    def continuation(self) -> str:
+        return " " * PROMPT_WIDTH
+
     def user_message(self, typed: list[str], text: str) -> None:
         """Replace the echoed input with a tinted block, as pi does, so user
         turns stand apart from the model's answers. ``typed`` is what readline
-        echoed."""
+        echoed; ``text`` can differ after a trip through the editor."""
         if not COLOR or not sys.stdout.isatty():
             return
         width = _width()
