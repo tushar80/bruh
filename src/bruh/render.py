@@ -15,11 +15,13 @@ import os
 import re
 import shutil
 import sys
+import textwrap
 import threading
 from typing import Any
 
 _TRUECOLOR: dict[str, str | int] = {
     "header_bg": "#282832",
+    "user_bg": "#2e3754",
     "ok_bg": "#283228",
     "err_bg": "#3c2828",
     "title": "#d4d4d4",
@@ -33,6 +35,7 @@ _TRUECOLOR: dict[str, str | int] = {
 
 _XTERM256: dict[str, str | int] = {
     "header_bg": 236,
+    "user_bg": 17,
     "ok_bg": 22,
     "err_bg": 52,
     "title": 252,
@@ -44,7 +47,7 @@ _XTERM256: dict[str, str | int] = {
     "thinking": 244,
 }
 
-_BG_TOKENS = ("header_bg", "ok_bg", "err_bg")
+_BG_TOKENS = ("header_bg", "user_bg", "ok_bg", "err_bg")
 
 
 def _color_enabled() -> bool:
@@ -111,6 +114,7 @@ HEAD_ONLY = ("write", "edit")  # result collapses to a one-line summary
 TAIL_PREVIEW = ("bash",)  # keep the end of the output, where failures are
 PREVIEW_LINES = {"bash": 5}
 DEFAULT_PREVIEW = 10
+PROMPT_WIDTH = 2  # visible width of prompt()
 
 
 def _width() -> int:
@@ -408,6 +412,23 @@ class Renderer:
         # input() goes through readline (libedit in uv's Python), which drops a
         # bare ESC from the prompt. \x01..\x02 marks a span as non-printing.
         return re.sub(r"\x1b\[[0-9;]*m", "\x01\\g<0>\x02", bold(fg("accent", "\u276f"))) + " "
+
+    def user_message(self, typed: list[str], text: str) -> None:
+        """Replace the echoed input with a tinted block, as pi does, so user
+        turns stand apart from the model's answers. ``typed`` is what readline
+        echoed."""
+        if not COLOR or not sys.stdout.isatty():
+            return
+        width = _width()
+        echoed = sum(max(1, -(-(PROMPT_WIDTH + len(line)) // width)) for line in typed)
+        rows = [_row("", "user_bg", width)]
+        for line in text.splitlines():
+            parts = textwrap.wrap(_sanitize(line), width - 2) or [""]
+            rows += [_row(part, "user_bg", width) for part in parts]
+        rows.append(_row("", "user_bg", width))
+        with self._lock:
+            # Cursor up over what readline echoed, then clear to end of screen.
+            self._err(f"\x1b[{echoed}F\x1b[J" + "\n".join(rows) + "\n")
 
     def error(self, message: str) -> None:
         self._line("error", f"[error] {message}")

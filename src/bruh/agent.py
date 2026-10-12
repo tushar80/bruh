@@ -313,6 +313,7 @@ def main() -> None:
             return
         if not line.strip():
             continue
+        agent.out.user_message([line], line)
         agent.run(line)
         agent.out.turn_break()
 
