@@ -18,7 +18,7 @@ behavior, the corresponding pi code is the reference.
   `ThreadPoolExecutor` (see `Agent._execute_tool_turn`); results are reordered
   back to the wire order before being appended (the Anthropic messages API
   requires tool_result ids to line up with the prior tool_use ids).
-- Default base URL: `https://opencode.ai/zen/go/v1`. Override with `BRUH_BASE_URL`.
+- Default base URL: `https://opencode.ai/inference/go/v1`. Override with `BRUH_BASE_URL`.
 - API key from `BRUH_API_KEY`.
 
 ## Commands

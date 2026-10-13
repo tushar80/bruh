@@ -132,7 +132,7 @@ class Provider(Protocol):
     ) -> Iterator[Event]: ...
 
 
-DEFAULT_BASE_URL = "https://opencode.ai/zen/go/v1"
+DEFAULT_BASE_URL = "https://opencode.ai/inference/go/v1"
 # OpenCode Go rejects requests without a stable per-conversation session id and
 # asks clients to identify themselves: https://opencode.ai/docs/go/
 USER_AGENT = f"bruh/{version('bruh')}"
