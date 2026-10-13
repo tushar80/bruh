@@ -9,7 +9,7 @@ behavior, the corresponding pi code is the reference.
 
 ## Quick orientation
 
-- ~1600 LOC, 5 modules under `src/bruh/`. Dependency: `httpx` only.
+- ~1700 LOC, 5 modules under `src/bruh/`. Dependency: `httpx` only.
 - Two streaming backends against the same base URL, selected via `--provider`:
   - `openai` (default) -> `{base}/chat/completions`
   - `anthropic`       -> `{base}/messages`
